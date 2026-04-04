@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "auditor-tee"
+version = "0.1.0"
+description = "CLI for auditor-in-a-TEE: multi-party computation in a Trusted Execution Environment"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.25",
+]
+
+[project.scripts]
+auditor-tee = "cli.main:main"
