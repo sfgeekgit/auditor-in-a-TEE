@@ -9,6 +9,7 @@ description = "CLI for auditor-in-a-TEE: multi-party computation in a Trusted Ex
 requires-python = ">=3.10"
 dependencies = [
     "httpx>=0.25",
+    "cryptography>=41.0",
 ]
 
 [project.scripts]

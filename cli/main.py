@@ -2,21 +2,21 @@
 CLI tool for auditor-in-a-TEE.
 
 Usage:
+  auditor-tee keygen                            Generate a new Ed25519 keypair
   auditor-tee view <plan_id>                    View a plan
-  auditor-tee sign <plan_id> --as user1|user2 --key <pubkey>
-  auditor-tee upload <plan_id> --as user1|user2 --key <pubkey> --file <path>
-  auditor-tee upload <plan_id> --as user1|user2 --key <pubkey> --data <string>
+  auditor-tee sign <plan_id> --as user1|user2 --private-key <hex>
+  auditor-tee upload <plan_id> --as user1|user2 --private-key <hex> --file <path>
+  auditor-tee upload <plan_id> --as user1|user2 --private-key <hex> --data <string>
   auditor-tee run <plan_id>                     Execute the plan
   auditor-tee results <plan_id>                 Get results
 """
 
 import argparse
-import json
 import os
 import sys
-import textwrap
 
 from .client import AuditorClient
+from .crypto import generate_keypair, sign, public_key_from_private
 
 
 DEFAULT_API_URL = os.environ.get("AUDITOR_TEE_URL", "http://localhost:8080")
@@ -76,15 +76,22 @@ def format_results(results: dict) -> str:
     return "\n".join(lines)
 
 
+def cmd_keygen(args, client):
+    private_hex, public_hex = generate_keypair()
+    print(f"Private key (keep secret): {private_hex}")
+    print(f"Public key (share this):   {public_hex}")
+    print()
+    print("Save your private key securely. You will need it to sign plans and upload data.")
+
+
 def cmd_view(args, client):
     plan = client.get_plan(args.plan_id)
     print(format_plan(plan))
 
 
 def cmd_sign(args, client):
-    if not args.key:
-        print("Error: --key is required", file=sys.stderr)
-        sys.exit(1)
+    # Derive public key from private key
+    public_key = public_key_from_private(args.private_key)
 
     # Show the plan first for review
     plan = client.get_plan(args.plan_id)
@@ -92,21 +99,25 @@ def cmd_sign(args, client):
     print(format_plan(plan))
     print("====================")
     print()
+    print(f"Your public key: {public_key}")
+    print()
 
     confirm = input(f"Sign this plan as {args.user_id}? [y/N] ")
     if confirm.lower() != "y":
         print("Aborted.")
         return
 
-    result = client.sign_plan(args.plan_id, args.user_id, args.key)
+    # Sign the plan hash with private key
+    signature = sign(args.private_key, plan["plan_hash"])
+
+    result = client.sign_plan(args.plan_id, args.user_id, public_key, signature)
     print(f"Signed. Status: {result['status']}")
     print(f"Signed by: {', '.join(result['signed_by'])}")
 
 
 def cmd_upload(args, client):
-    if not args.key:
-        print("Error: --key is required", file=sys.stderr)
-        sys.exit(1)
+    # Derive public key from private key
+    public_key = public_key_from_private(args.private_key)
 
     if args.file:
         with open(args.file, "r") as f:
@@ -127,7 +138,7 @@ def cmd_upload(args, client):
         print("Aborted.")
         return
 
-    result = client.submit_data(args.plan_id, args.user_id, data, args.key)
+    result = client.submit_data(args.plan_id, args.user_id, data, public_key)
     print(f"Submitted. Status: {result['status']}")
     print(f"Data submitted by: {', '.join(result['data_submitted_by'])}")
 
@@ -161,6 +172,9 @@ def main():
 
     sub = parser.add_subparsers(dest="command", required=True)
 
+    # keygen
+    sub.add_parser("keygen", help="Generate a new Ed25519 keypair")
+
     # view
     p_view = sub.add_parser("view", help="View a plan")
     p_view.add_argument("plan_id")
@@ -169,13 +183,13 @@ def main():
     p_sign = sub.add_parser("sign", help="Sign a plan")
     p_sign.add_argument("plan_id")
     p_sign.add_argument("--as", dest="user_id", required=True, choices=["user1", "user2"])
-    p_sign.add_argument("--key", required=True, help="Your public key (hex)")
+    p_sign.add_argument("--private-key", required=True, help="Your Ed25519 private key (hex)")
 
     # upload
     p_upload = sub.add_parser("upload", help="Upload private data")
     p_upload.add_argument("plan_id")
     p_upload.add_argument("--as", dest="user_id", required=True, choices=["user1", "user2"])
-    p_upload.add_argument("--key", required=True, help="Your public key (hex)")
+    p_upload.add_argument("--private-key", required=True, help="Your Ed25519 private key (hex)")
     p_upload.add_argument("--file", help="Path to data file")
     p_upload.add_argument("--data", help="Data string (alternative to --file)")
 
@@ -191,6 +205,7 @@ def main():
     client = AuditorClient(args.url)
 
     commands = {
+        "keygen": cmd_keygen,
         "view": cmd_view,
         "sign": cmd_sign,
         "upload": cmd_upload,

@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir fastapi uvicorn pydantic httpx
+RUN pip install --no-cache-dir fastapi uvicorn pydantic httpx cryptography
 
 COPY webapp/ ./
 

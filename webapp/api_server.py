@@ -12,6 +12,8 @@ import json
 import time
 from typing import Optional
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -151,6 +153,16 @@ def sign_plan(plan_id: str, req: SignRequest):
 
     if req.user_id not in ("user1", "user2"):
         raise HTTPException(status_code=400, detail="user_id must be 'user1' or 'user2'")
+
+    # Verify Ed25519 signature over the plan hash
+    if req.signature:
+        try:
+            public_bytes = bytes.fromhex(req.public_key)
+            public_key = Ed25519PublicKey.from_public_bytes(public_bytes)
+            signature_bytes = bytes.fromhex(req.signature)
+            public_key.verify(signature_bytes, plan["plan_hash"].encode())
+        except Exception as e:
+            raise HTTPException(status_code=403, detail=f"Invalid signature: {e}")
 
     plan["signatures"][req.user_id] = {
         "public_key": req.public_key,

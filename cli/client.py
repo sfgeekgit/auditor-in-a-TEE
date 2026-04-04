@@ -49,10 +49,10 @@ class AuditorClient:
         resp.raise_for_status()
         return resp.json()
 
-    def sign_plan(self, plan_id: str, user_id: str, public_key: str) -> dict:
+    def sign_plan(self, plan_id: str, user_id: str, public_key: str, signature: str = "") -> dict:
         resp = httpx.post(
             f"{self.api_url}/plan/{plan_id}/sign",
-            json={"user_id": user_id, "public_key": public_key, "signature": ""},
+            json={"user_id": user_id, "public_key": public_key, "signature": signature},
             timeout=self.timeout,
         )
         resp.raise_for_status()
