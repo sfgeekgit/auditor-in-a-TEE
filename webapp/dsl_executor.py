@@ -7,6 +7,7 @@ Supports two command types:
 """
 
 import io
+import os
 import sys
 import traceback
 import httpx
@@ -14,7 +15,10 @@ from typing import Any
 
 
 TINFOIL_API_URL = "https://api.tinfoil.sh/v1/chat/completions"
-DEFAULT_MODEL = "meta-llama/Llama-3.3-70B-Instruct"
+DEFAULT_MODEL = "deepseek-r1-0528"
+
+# Read API key from env (injected as a Tinfoil secret) or fallback to plan-provided key
+TINFOIL_API_KEY = os.environ.get("TINFOIL_API_KEY", "")
 
 
 def execute_plan(steps: list[dict], context: dict, tinfoil_api_key: str | None = None) -> list[dict]:
@@ -112,14 +116,16 @@ def _run_llm(step: dict, context: dict, step_outputs: dict, api_key: str | None)
 
     prompt = _fill_template(prompt_template, context, step_outputs)
 
-    if not api_key:
+    # Prefer env var key (Tinfoil secret), fallback to plan-provided key
+    effective_key = TINFOIL_API_KEY or api_key
+    if not effective_key:
         return {"result": f"[LLM call skipped - no API key]\nPrompt would be:\n{prompt}"}
 
     try:
         resp = httpx.post(
             TINFOIL_API_URL,
             headers={
-                "Authorization": f"Bearer {api_key}",
+                "Authorization": f"Bearer {effective_key}",
                 "Content-Type": "application/json",
             },
             json={
