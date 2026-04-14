@@ -44,6 +44,7 @@ class DataFormat(BaseModel):
 class Step(BaseModel):
     type: str = Field(description="Step type: run_python or run_llm")
     prompt: Optional[str] = Field(default=None, description="Prompt template for run_llm")
+    constitution: Optional[str] = Field(default=None, description="Constitution rules for run_llm steps. Available as {constitution} in prompt template.")
     model: Optional[str] = Field(default=None, description="Model name for run_llm")
     max_tokens: Optional[int] = Field(default=1000)
     script: Optional[str] = Field(default=None, description="Script name for run_python")
@@ -53,6 +54,8 @@ class Step(BaseModel):
 
 class CreatePlanRequest(BaseModel):
     name: str = Field(description="Human-readable plan name")
+    user1_public_key: str = Field(description="User 1's public key (hex-encoded)")
+    user2_public_key: str = Field(description="User 2's public key (hex-encoded)")
     data1_format: DataFormat = Field(description="Expected format for user 1's data")
     data2_format: DataFormat = Field(description="Expected format for user 2's data")
     steps: list[Step] = Field(description="DSL steps to execute")
@@ -89,9 +92,16 @@ def create_plan(req: CreatePlanRequest):
     """Create a new audit plan. Returns the plan ID and hash."""
     plan_id = str(uuid.uuid4())[:8]
 
-    # Compute a hash of the plan for signing
+    expected_keys = {
+        "user1": req.user1_public_key,
+        "user2": req.user2_public_key,
+    }
+
+    # Compute a hash of the plan for signing (includes expected public keys and constitution)
     plan_content = json.dumps({
         "name": req.name,
+        "user1_public_key": req.user1_public_key,
+        "user2_public_key": req.user2_public_key,
         "data1_format": req.data1_format.model_dump(),
         "data2_format": req.data2_format.model_dump(),
         "steps": [s.model_dump() for s in req.steps],
@@ -102,6 +112,7 @@ def create_plan(req: CreatePlanRequest):
     plans[plan_id] = {
         "id": plan_id,
         "name": req.name,
+        "expected_keys": expected_keys,
         "data1_format": req.data1_format.model_dump(),
         "data2_format": req.data2_format.model_dump(),
         "steps": [s.model_dump() for s in req.steps],
@@ -132,6 +143,7 @@ def get_plan(plan_id: str):
     return {
         "id": plan["id"],
         "name": plan["name"],
+        "expected_keys": plan["expected_keys"],
         "data1_format": plan["data1_format"],
         "data2_format": plan["data2_format"],
         "steps": plan["steps"],
@@ -146,13 +158,18 @@ def get_plan(plan_id: str):
 
 @app.post("/plan/{plan_id}/sign")
 def sign_plan(plan_id: str, req: SignRequest):
-    """Sign off on a plan. Both users must sign before data can be submitted."""
+    """Sign off on a plan. Each user can sign independently."""
     plan = plans.get(plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
 
     if req.user_id not in ("user1", "user2"):
         raise HTTPException(status_code=400, detail="user_id must be 'user1' or 'user2'")
+
+    # Verify public key matches the one specified at plan creation
+    expected_key = plan["expected_keys"].get(req.user_id)
+    if expected_key and req.public_key != expected_key:
+        raise HTTPException(status_code=403, detail="Public key does not match the key specified in the plan")
 
     # Verify Ed25519 signature over the plan hash
     if req.signature:
@@ -170,8 +187,7 @@ def sign_plan(plan_id: str, req: SignRequest):
         "signed_at": time.time(),
     }
 
-    if len(plan["signatures"]) == 2:
-        plan["status"] = "signed"
+    _update_plan_status(plan)
 
     return {
         "status": plan["status"],
@@ -181,7 +197,7 @@ def sign_plan(plan_id: str, req: SignRequest):
 
 @app.post("/plan/{plan_id}/data")
 def submit_data(plan_id: str, req: SubmitDataRequest):
-    """Submit private data. Plan must be signed by both parties first."""
+    """Submit private data. The submitting user must have signed the plan first."""
     plan = plans.get(plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
@@ -189,20 +205,16 @@ def submit_data(plan_id: str, req: SubmitDataRequest):
     if req.user_id not in ("user1", "user2"):
         raise HTTPException(status_code=400, detail="user_id must be 'user1' or 'user2'")
 
-    if plan["status"] not in ("signed", "data_partial"):
-        raise HTTPException(status_code=400, detail=f"Plan must be signed by both parties first (current status: {plan['status']})")
+    # The submitting user must have signed
+    if req.user_id not in plan["signatures"]:
+        raise HTTPException(status_code=400, detail=f"{req.user_id} must sign the plan before submitting data")
 
     # Verify public key matches the one used to sign
-    if req.user_id in plan["signatures"]:
-        if plan["signatures"][req.user_id]["public_key"] != req.public_key:
-            raise HTTPException(status_code=403, detail="Public key does not match the key used to sign the plan")
+    if plan["signatures"][req.user_id]["public_key"] != req.public_key:
+        raise HTTPException(status_code=403, detail="Public key does not match the key used to sign the plan")
 
     plan["data"][req.user_id] = req.data
-
-    if len(plan["data"]) == 2:
-        plan["status"] = "data_ready"
-    else:
-        plan["status"] = "data_partial"
+    _update_plan_status(plan)
 
     return {
         "status": plan["status"],
@@ -210,15 +222,27 @@ def submit_data(plan_id: str, req: SubmitDataRequest):
     }
 
 
+def _update_plan_status(plan):
+    """Recompute plan status based on current signatures and data."""
+    both_signed = "user1" in plan["signatures"] and "user2" in plan["signatures"]
+    both_data = "user1" in plan["data"] and "user2" in plan["data"]
+    if both_signed and both_data:
+        plan["status"] = "data_ready"
+    elif both_signed:
+        plan["status"] = "signed"
+    else:
+        plan["status"] = "created"
+
+
 @app.post("/plan/{plan_id}/run")
 def run_plan(plan_id: str):
-    """Execute the plan. Both parties must have submitted data."""
+    """Execute the plan. Both parties must have signed and submitted data."""
     plan = plans.get(plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
 
     if plan["status"] != "data_ready":
-        raise HTTPException(status_code=400, detail=f"Both parties must submit data first (current status: {plan['status']})")
+        raise HTTPException(status_code=400, detail=f"Both parties must sign and submit data first (current status: {plan['status']})")
 
     plan["status"] = "running"
 

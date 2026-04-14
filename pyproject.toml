@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 dependencies = [
     "httpx>=0.25",
     "cryptography>=41.0",
+    "tinfoil",
 ]
 
 [project.scripts]

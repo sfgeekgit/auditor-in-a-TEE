@@ -7,17 +7,18 @@ Supports two command types:
 """
 
 import io
+import logging
 import os
 import sys
 import traceback
-import httpx
 from typing import Any
 
+from tinfoil import TinfoilAI
 
-TINFOIL_API_URL = "https://api.tinfoil.sh/v1/chat/completions"
-DEFAULT_MODEL = "deepseek-r1-0528"
 
-# Read API key from env (injected as a Tinfoil secret) or fallback to plan-provided key
+log = logging.getLogger(__name__)
+
+DEFAULT_MODEL = os.environ.get("MODEL_NAME", "gemma4-31b")
 TINFOIL_API_KEY = os.environ.get("TINFOIL_API_KEY", "")
 
 
@@ -44,14 +45,16 @@ def execute_plan(steps: list[dict], context: dict, tinfoil_api_key: str | None =
             elif step_type == "run_llm":
                 output = _run_llm(step, context, step_outputs, tinfoil_api_key)
             else:
-                output = {"error": f"Unknown step type: {step_type}"}
+                output = {"result": "Step skipped: unknown type."}
 
-            step_outputs[f"step_{i}_output"] = output.get("result", "")
+            step_outputs[f"step_{i}_output"] = output.get("result") or ""
             results.append({"step": i, "type": step_type, "status": "success", **output})
         except Exception as e:
-            err = {"step": i, "type": step_type, "status": "error", "error": str(e)}
-            step_outputs[f"step_{i}_output"] = f"ERROR: {e}"
-            results.append(err)
+            # Log the real error server-side, never expose to users
+            log.exception("Step %d (%s) failed", i, step_type)
+            step_outputs[f"step_{i}_output"] = "Step failed."
+            results.append({"step": i, "type": step_type, "status": "error",
+                            "result": "Step failed."})
 
     return results
 
@@ -75,7 +78,7 @@ def _run_python(step: dict, context: dict, step_outputs: dict) -> dict:
     elif step.get("code"):
         code = step["code"]
     else:
-        return {"error": f"Script '{script_name}' not found"}
+        return {"result": "Script execution failed."}
 
     # Build namespace with inputs
     namespace = {
@@ -87,7 +90,7 @@ def _run_python(step: dict, context: dict, step_outputs: dict) -> dict:
     for k, v in step_outputs.items():
         namespace[k] = v
     # Add any explicit inputs
-    for input_name in step.get("inputs", []):
+    for input_name in (step.get("inputs") or []):
         if input_name in context:
             namespace[input_name] = context[input_name]
         elif input_name in step_outputs:
@@ -99,6 +102,10 @@ def _run_python(step: dict, context: dict, step_outputs: dict) -> dict:
 
     try:
         exec(code, namespace)
+    except Exception as e:
+        # Log full error server-side, return generic message to users
+        log.exception("Python step execution failed")
+        return {"result": "Script execution failed."}
     finally:
         sys.stdout = old_stdout
 
@@ -106,7 +113,7 @@ def _run_python(step: dict, context: dict, step_outputs: dict) -> dict:
     # Look for a 'result' variable in namespace, fallback to stdout
     result = namespace.get("result", stdout_output.strip())
 
-    return {"result": str(result), "stdout": stdout_output}
+    return {"result": str(result)}
 
 
 def _run_llm(step: dict, context: dict, step_outputs: dict, api_key: str | None) -> dict:
@@ -114,30 +121,29 @@ def _run_llm(step: dict, context: dict, step_outputs: dict, api_key: str | None)
     prompt_template = step.get("prompt", "")
     model = step.get("model", DEFAULT_MODEL)
 
-    prompt = _fill_template(prompt_template, context, step_outputs)
+    # Add step-level constitution to context for template filling
+    llm_context = {**context}
+    if step.get("constitution"):
+        llm_context["constitution"] = step["constitution"]
 
-    # Prefer env var key (Tinfoil secret), fallback to plan-provided key
+    prompt = _fill_template(prompt_template, llm_context, step_outputs)
+
     effective_key = TINFOIL_API_KEY or api_key
     if not effective_key:
         return {"result": f"[LLM call skipped - no API key]\nPrompt would be:\n{prompt}"}
 
+    client = TinfoilAI(api_key=effective_key)
+
     try:
-        resp = httpx.post(
-            TINFOIL_API_URL,
-            headers={
-                "Authorization": f"Bearer {effective_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": step.get("max_tokens", 1000),
-            },
-            timeout=120,
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=step.get("max_tokens", 1000),
         )
-        resp.raise_for_status()
-        data = resp.json()
-        result = data["choices"][0]["message"]["content"]
+        msg = resp.choices[0].message
+        # Some models (reasoning models) put content in reasoning_content
+        result = msg.content or getattr(msg, "reasoning_content", None) or ""
         return {"result": result}
     except Exception as e:
-        return {"result": f"LLM call failed: {e}", "error": str(e)}
+        log.exception("LLM call failed")
+        return {"result": "LLM call failed."}
