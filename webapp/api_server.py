@@ -7,19 +7,23 @@ submit their data to the TEE, and receive results.
 
 import os
 import uuid
-import hashlib
-import json
 import time
 from typing import Optional
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-
 import uvicorn
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from canonical import canonical_plan_bytes, plan_hash_hex, submit_message
 from dsl_executor import execute_plan
+
+
+# Strict signature verification is the default. Set REQUIRE_SIGNATURES=false
+# in local dev if you want to exercise the flow without real keys.
+REQUIRE_SIGS = os.getenv("REQUIRE_SIGNATURES", "true").lower() == "true"
 
 app = FastAPI(
     title="Auditor-in-a-TEE API",
@@ -44,7 +48,7 @@ class DataFormat(BaseModel):
 class Step(BaseModel):
     type: str = Field(description="Step type: run_python or run_llm")
     prompt: Optional[str] = Field(default=None, description="Prompt template for run_llm")
-    constitution: Optional[str] = Field(default=None, description="Constitution rules for run_llm steps. Available as {constitution} in prompt template.")
+    constitution: Optional[str] = Field(default=None, description="Constitution text for run_llm, referenced as {constitution} in the prompt")
     model: Optional[str] = Field(default=None, description="Model name for run_llm")
     max_tokens: Optional[int] = Field(default=1000)
     script: Optional[str] = Field(default=None, description="Script name for run_python")
@@ -54,8 +58,8 @@ class Step(BaseModel):
 
 class CreatePlanRequest(BaseModel):
     name: str = Field(description="Human-readable plan name")
-    user1_public_key: str = Field(description="User 1's public key (hex-encoded)")
-    user2_public_key: str = Field(description="User 2's public key (hex-encoded)")
+    user1_public_key: str = Field(min_length=64, max_length=64, description="Expected ed25519 public key for user 1 (64 hex chars)")
+    user2_public_key: str = Field(min_length=64, max_length=64, description="Expected ed25519 public key for user 2 (64 hex chars)")
     data1_format: DataFormat = Field(description="Expected format for user 1's data")
     data2_format: DataFormat = Field(description="Expected format for user 2's data")
     steps: list[Step] = Field(description="DSL steps to execute")
@@ -65,14 +69,15 @@ class CreatePlanRequest(BaseModel):
 
 class SignRequest(BaseModel):
     user_id: str = Field(description="'user1' or 'user2'")
-    public_key: str = Field(description="User's public key (hex-encoded)")
-    signature: str = Field(default="", description="Signature over the plan hash (placeholder for now)")
+    public_key: str = Field(min_length=64, max_length=64, description="User's ed25519 public key (64 hex chars)")
+    signature: str = Field(default="", description="ed25519 signature over canonical_plan_bytes (128 hex chars); required when REQUIRE_SIGNATURES=true")
 
 
 class SubmitDataRequest(BaseModel):
     user_id: str = Field(description="'user1' or 'user2'")
     data: str = Field(description="The private data")
-    public_key: str = Field(description="User's public key to verify identity")
+    public_key: str = Field(min_length=64, max_length=64, description="User's ed25519 public key (64 hex chars) — must match the key used at sign time")
+    signature: str = Field(default="", description="ed25519 signature over submit_message(plan_hash, data); required when REQUIRE_SIGNATURES=true")
 
 
 # --- In-memory storage ---
@@ -92,43 +97,31 @@ def create_plan(req: CreatePlanRequest):
     """Create a new audit plan. Returns the plan ID and hash."""
     plan_id = str(uuid.uuid4())[:8]
 
-    expected_keys = {
-        "user1": req.user1_public_key,
-        "user2": req.user2_public_key,
-    }
-
-    # Compute a hash of the plan for signing (includes expected public keys and constitution)
-    plan_content = json.dumps({
+    plan = {
+        "id": plan_id,
         "name": req.name,
         "user1_public_key": req.user1_public_key,
         "user2_public_key": req.user2_public_key,
         "data1_format": req.data1_format.model_dump(),
         "data2_format": req.data2_format.model_dump(),
         "steps": [s.model_dump() for s in req.steps],
+        # Store scripts as-sent so canonical_plan_bytes matches what the client signed.
+        # The executor is tolerant of None.
         "scripts": req.scripts,
-    }, sort_keys=True)
-    plan_hash = hashlib.sha256(plan_content.encode()).hexdigest()
-
-    plans[plan_id] = {
-        "id": plan_id,
-        "name": req.name,
-        "expected_keys": expected_keys,
-        "data1_format": req.data1_format.model_dump(),
-        "data2_format": req.data2_format.model_dump(),
-        "steps": [s.model_dump() for s in req.steps],
-        "scripts": req.scripts or {},
         "tinfoil_api_key": req.tinfoil_api_key,
-        "plan_hash": plan_hash,
         "signatures": {},
         "data": {},
         "results": None,
         "status": "created",
         "created_at": time.time(),
     }
+    plan["plan_hash"] = plan_hash_hex(plan)
+
+    plans[plan_id] = plan
 
     return {
         "plan_id": plan_id,
-        "plan_hash": plan_hash,
+        "plan_hash": plan["plan_hash"],
         "status": "created",
     }
 
@@ -143,15 +136,21 @@ def get_plan(plan_id: str):
     return {
         "id": plan["id"],
         "name": plan["name"],
-        "expected_keys": plan["expected_keys"],
         "data1_format": plan["data1_format"],
         "data2_format": plan["data2_format"],
         "steps": plan["steps"],
         "scripts": plan["scripts"],
         "plan_hash": plan["plan_hash"],
         "status": plan["status"],
+        "expected_keys": {
+            "user1": plan["user1_public_key"],
+            "user2": plan["user2_public_key"],
+        },
         "signatures": {k: {"public_key": v["public_key"][:16] + "..."} for k, v in plan["signatures"].items()},
-        "data_submitted": {k: True for k in plan["data"]},
+        "data_submitted": {
+            "user1": "user1" in plan["data"],
+            "user2": "user2" in plan["data"],
+        },
         "has_results": plan["results"] is not None,
     }
 
@@ -166,20 +165,19 @@ def sign_plan(plan_id: str, req: SignRequest):
     if req.user_id not in ("user1", "user2"):
         raise HTTPException(status_code=400, detail="user_id must be 'user1' or 'user2'")
 
-    # Verify public key matches the one specified at plan creation
-    expected_key = plan["expected_keys"].get(req.user_id)
-    if expected_key and req.public_key != expected_key:
-        raise HTTPException(status_code=403, detail="Public key does not match the key specified in the plan")
+    # Identity: the signer's pubkey must match the one committed at plan creation.
+    expected_pk = plan["user1_public_key"] if req.user_id == "user1" else plan["user2_public_key"]
+    if req.public_key.lower() != expected_pk.lower():
+        raise HTTPException(status_code=403, detail=f"public_key does not match expected key for {req.user_id}")
 
-    # Verify Ed25519 signature over the plan hash
-    if req.signature:
+    if REQUIRE_SIGS:
+        if len(req.signature) != 128:
+            raise HTTPException(status_code=400, detail="signature must be 128 hex chars (ed25519, 64 bytes)")
         try:
-            public_bytes = bytes.fromhex(req.public_key)
-            public_key = Ed25519PublicKey.from_public_bytes(public_bytes)
-            signature_bytes = bytes.fromhex(req.signature)
-            public_key.verify(signature_bytes, plan["plan_hash"].encode())
-        except Exception as e:
-            raise HTTPException(status_code=403, detail=f"Invalid signature: {e}")
+            pk = Ed25519PublicKey.from_public_bytes(bytes.fromhex(req.public_key))
+            pk.verify(bytes.fromhex(req.signature), canonical_plan_bytes(plan))
+        except (InvalidSignature, ValueError):
+            raise HTTPException(status_code=403, detail="Invalid signature")
 
     plan["signatures"][req.user_id] = {
         "public_key": req.public_key,
@@ -209,9 +207,21 @@ def submit_data(plan_id: str, req: SubmitDataRequest):
     if req.user_id not in plan["signatures"]:
         raise HTTPException(status_code=400, detail=f"{req.user_id} must sign the plan before submitting data")
 
-    # Verify public key matches the one used to sign
-    if plan["signatures"][req.user_id]["public_key"] != req.public_key:
+    # Public key must match the one used to sign (which in turn matched the plan's expected_keys).
+    if plan["signatures"][req.user_id]["public_key"].lower() != req.public_key.lower():
         raise HTTPException(status_code=403, detail="Public key does not match the key used to sign the plan")
+
+    if REQUIRE_SIGS:
+        if len(req.signature) != 128:
+            raise HTTPException(status_code=400, detail="signature must be 128 hex chars (ed25519, 64 bytes)")
+        try:
+            pk = Ed25519PublicKey.from_public_bytes(bytes.fromhex(req.public_key))
+            pk.verify(
+                bytes.fromhex(req.signature),
+                submit_message(plan["plan_hash"], req.data),
+            )
+        except (InvalidSignature, ValueError):
+            raise HTTPException(status_code=403, detail="Invalid data signature")
 
     plan["data"][req.user_id] = req.data
     _update_plan_status(plan)

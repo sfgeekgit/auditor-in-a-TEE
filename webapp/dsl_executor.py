@@ -71,7 +71,7 @@ def _fill_template(template: str, context: dict, step_outputs: dict) -> str:
 def _run_python(step: dict, context: dict, step_outputs: dict) -> dict:
     """Execute a python script in a restricted namespace."""
     script_name = step.get("script", "")
-    scripts = context.get("scripts", {})
+    scripts = context.get("scripts") or {}
 
     if script_name and script_name in scripts:
         code = scripts[script_name]
@@ -121,11 +121,8 @@ def _run_llm(step: dict, context: dict, step_outputs: dict, api_key: str | None)
     prompt_template = step.get("prompt", "")
     model = step.get("model", DEFAULT_MODEL)
 
-    # Add step-level constitution to context for template filling
-    llm_context = {**context}
-    if step.get("constitution"):
-        llm_context["constitution"] = step["constitution"]
-
+    # Per-step constitution is exposed as the {constitution} placeholder.
+    llm_context = {**context, "constitution": step.get("constitution") or ""}
     prompt = _fill_template(prompt_template, llm_context, step_outputs)
 
     effective_key = TINFOIL_API_KEY or api_key

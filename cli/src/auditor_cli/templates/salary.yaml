@@ -1,0 +1,152 @@
+# Competitive Salary Benchmarking
+#
+# Two companies compare compensation bands without revealing individual salaries.
+# Before running `auditor plan create`, replace the placeholder public keys below
+# with the real ed25519 pubkeys of both signers (get them via `auditor keygen`).
+
+name: "Competitive Salary Benchmarking"
+user1_public_key: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+user2_public_key: "cafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe"
+
+data1_format:
+  description: >-
+    JSON object with "company" name and "employees" array. Each employee has
+    "role", "department", and "annual_comp" (total compensation in USD).
+  schema_hint: "json"
+
+data2_format:
+  description: >-
+    JSON object with "company" name and "employees" array. Each employee has
+    "role", "department", and "annual_comp" (total compensation in USD).
+  schema_hint: "json"
+
+steps:
+  - type: run_python
+    code: |
+      import json
+
+      # --- Validate data format ---
+      REQUIRED_KEYS = {"company", "employees"}
+      REQUIRED_EMP_KEYS = {"role", "department", "annual_comp"}
+
+      errors = []
+      for label, raw in [("Company 1", data1), ("Company 2", data2)]:
+          try:
+              d = json.loads(raw)
+          except Exception:
+              errors.append(f"{label}: invalid JSON")
+              continue
+          missing = REQUIRED_KEYS - set(d.keys())
+          if missing:
+              errors.append(f"{label}: missing keys {missing}")
+              continue
+          if not isinstance(d["employees"], list) or len(d["employees"]) == 0:
+              errors.append(f"{label}: 'employees' must be a non-empty array")
+              continue
+          for i, emp in enumerate(d["employees"]):
+              emp_missing = REQUIRED_EMP_KEYS - set(emp.keys())
+              if emp_missing:
+                  errors.append(f"{label} employee {i}: missing {emp_missing}")
+
+      if errors:
+          result = "VALIDATION FAILED:\n" + "\n".join(errors)
+      else:
+          # --- Compute benchmarking ---
+          d1 = json.loads(data1)
+          d2 = json.loads(data2)
+
+          def percentiles(values):
+              s = sorted(values)
+              n = len(s)
+              return {
+                  "p25": s[int(n * 0.25)],
+                  "p50": s[int(n * 0.50)],
+                  "p75": s[int(n * 0.75)],
+                  "avg": round(sum(s) / n),
+              }
+
+          MIN_GROUP = 3
+
+          comps1 = [e["annual_comp"] for e in d1["employees"]]
+          comps2 = [e["annual_comp"] for e in d2["employees"]]
+
+          overall = {
+              d1["company"]: percentiles(comps1),
+              d2["company"]: percentiles(comps2),
+          }
+          overall["median_gap_pct"] = round(
+              (overall[d2["company"]]["p50"] - overall[d1["company"]]["p50"])
+              / overall[d1["company"]]["p50"] * 100, 1
+          )
+
+          depts = set()
+          dept_vals = {}
+          for co, obj in [(d1["company"], d1), (d2["company"], d2)]:
+              for e in obj["employees"]:
+                  dept = e["department"]
+                  depts.add(dept)
+                  dept_vals.setdefault(dept, {}).setdefault(co, []).append(e["annual_comp"])
+
+          by_department = {}
+          for dept in sorted(depts):
+              vals = dept_vals.get(dept, {})
+              c1_vals = vals.get(d1["company"], [])
+              c2_vals = vals.get(d2["company"], [])
+              if len(c1_vals) < MIN_GROUP or len(c2_vals) < MIN_GROUP:
+                  by_department[dept] = "insufficient data (< 3 employees per company)"
+              else:
+                  by_department[dept] = {
+                      d1["company"]: percentiles(c1_vals),
+                      d2["company"]: percentiles(c2_vals),
+                  }
+
+          result = json.dumps({
+              "overall": overall,
+              "by_department": by_department,
+              "methodology": "Percentile bands (p25/p50/p75) and averages. Groups with < 3 employees suppressed.",
+              "employee_counts": {d1["company"]: len(comps1), d2["company"]: len(comps2)},
+          }, indent=2)
+
+  - type: run_llm
+    model: "gemma4-31b"
+    constitution: |
+      preamble: |
+        Two competing companies want to benchmark their compensation bands
+        against each other without revealing individual employee salaries.
+        Both parties have agreed to share only aggregate statistics. The
+        following rules govern what analysis may be performed and what
+        outputs are permitted.
+
+      rules:
+        - id: no_individual_salaries
+          description: "No individual salary figures may appear in results."
+          details: "Results must contain only aggregate statistics (percentiles, averages, ranges). No single employee's compensation may be identifiable."
+        - id: minimum_group_size
+          description: "Statistics require at least 3 employees per group."
+          details: "Any department or role grouping with fewer than 3 employees from either company must be reported as 'insufficient data' rather than computed."
+        - id: aggregate_only
+          description: "Only aggregate comparisons are permitted."
+          details: "Allowed outputs: percentile bands (p25, p50, p75), averages, and percentage differences. No lists, distributions of individual data points, or exact min/max values."
+        - id: no_employee_identity
+          description: "No employee names, IDs, or identifying information may appear in results."
+          details: "If the input data contains names or identifiers, they must not be referenced in any output."
+    prompt: |
+      You are a final output reviewer and summarizer for a salary benchmarking audit.
+
+      CONSTITUTION:
+      {constitution}
+
+      ANALYSIS RESULTS:
+      {step_0_output}
+
+      First, verify compliance with all constitution rules:
+      1. Do any individual salary figures appear? (rule: no_individual_salaries)
+      2. Are small groups properly suppressed? (rule: minimum_group_size)
+      3. Are outputs limited to aggregate statistics? (rule: aggregate_only)
+      4. Is any employee identity information present? (rule: no_employee_identity)
+
+      If NON-COMPLIANT: state NON-COMPLIANT with a brief explanation of which rules were violated. Do NOT include any data, statistics, or analysis results — return ONLY the compliance verdict and rule citations.
+
+      If COMPLIANT: state COMPLIANT, then write a clear executive summary of the benchmarking results that both companies will receive. Use plain language, highlight key differences, and note any departments where data was insufficient. Format it as a professional report.
+
+tinfoil_api_key: null

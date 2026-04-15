@@ -1,0 +1,144 @@
+# OpenAI Chat Usage Audit
+#
+# Modeled after the "How People Use ChatGPT" research paper. A user has opted
+# in to let OpenAI researchers analyze their ChatGPT usage for aggregate
+# research. OpenAI submits specific research queries; conversation logs stay
+# private. The TEE runs approved queries and returns only aggregate stats.
+#
+# Before running `auditor plan create`, replace the placeholder public keys
+# below with the real ed25519 pubkeys of both signers.
+
+name: "OpenAI Chat Usage Audit"
+user1_public_key: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+user2_public_key: "cafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe"
+
+data1_format:
+  description: >-
+    JSON array of user ChatGPT conversations. Each entry has "id", "timestamp",
+    "context" (work | personal), and "messages" (array of {role, content}).
+  schema_hint: "json"
+
+data2_format:
+  description: >-
+    JSON object with "researcher" name and "queries" array. Each query has
+    "id", "question", and "type" (use_case_distribution | work_personal_split |
+    multi_turn_analysis).
+  schema_hint: "json"
+
+steps:
+  - type: run_llm
+    model: "gemma4-31b"
+    constitution: &oai_constitution |
+      preamble: |
+        Modeled after the "How People Use ChatGPT" research paper. A user
+        has opted in to let OpenAI researchers analyze their ChatGPT usage
+        for aggregate research. OpenAI submits specific research queries;
+        the user's conversation logs are private. The TEE runs approved
+        queries and returns only aggregate statistics. Both parties have
+        agreed to the following rules.
+
+      rules:
+        - id: approved_query_types
+          description: "Only the following query types are permitted."
+          details: >
+            use_case_distribution — what % of conversations fall into each use-case
+            category (coding, writing, analysis, math, creative, research, advice, other).
+            work_personal_split — what % of conversations are work-related vs personal.
+            multi_turn_analysis — average number of turns per conversation, by category.
+            Any query outside these three types must be REJECTED.
+        - id: no_conversation_content
+          description: "No conversation text, quotes, or paraphrases may appear in results."
+          details: "Results contain only category labels, percentages, and counts. No excerpts, summaries, or content from any individual conversation."
+        - id: k_anonymity
+          description: "Any category with fewer than 3 conversations must be suppressed."
+          details: "Report as '<3' instead of the exact count. Percentages for suppressed categories must also be withheld."
+        - id: no_reidentification
+          description: "No output may enable re-identification of individual conversations."
+          details: "No timestamps, conversation IDs, sequence information, or unique conversation attributes may appear. Only aggregate counts and percentages."
+        - id: no_pii
+          description: "No personally identifiable information in queries or results."
+          details: "No names, emails, IP addresses, device info, or any data that could identify the user."
+    prompt: |
+      You are a constitution compliance checker for a privacy-preserving ChatGPT usage audit.
+
+      CONSTITUTION (agreed by both parties):
+      {constitution}
+
+      RESEARCH QUERIES SUBMITTED BY OPENAI:
+      {data2}
+
+      For each query:
+      1. Check if its "type" matches one of the four approved_query_types
+      2. Check if the question text asks for anything that would violate other rules (conversation content, PII, re-identification)
+      3. State APPROVED or REJECTED with the relevant rule(s)
+
+      If ANY query is rejected, end with: VERDICT: REJECTED
+      If all queries pass, end with: VERDICT: APPROVED
+
+  - type: run_llm
+    model: "gemma4-31b"
+    constitution: *oai_constitution
+    prompt: |
+      You are a research analyst running inside a Trusted Execution Environment for a privacy-preserving ChatGPT usage study, modeled after the "How People Use ChatGPT" paper.
+
+      IMPORTANT: If the previous step rejected any queries, respond only with:
+      "BLOCKED: One or more research queries were rejected by the constitution checker."
+      Previous step output: {step_0_output}
+
+      If all queries were APPROVED, proceed with the analysis below.
+
+      CONSTITUTION:
+      {constitution}
+
+      USER'S CONVERSATION LOGS (private data — you may read but NEVER quote or paraphrase):
+      {data1}
+
+      APPROVED RESEARCH QUERIES:
+      {data2}
+
+      INSTRUCTIONS:
+      1. Read each conversation and classify it into exactly ONE use-case category:
+         coding, writing, analysis, math, creative, research, advice, or other.
+      2. Note whether each conversation is "work" or "personal" (from the context field).
+      3. Count the number of user turns in each conversation.
+      4. Answer EACH query using ONLY aggregate counts and percentages:
+         - use_case_distribution: count and percentage per category
+         - work_personal_split: count and percentage for work vs personal
+         - multi_turn_analysis: average user turns per use-case category
+         - temporal_pattern: count per day of the week
+      5. SUPPRESSION RULE: If any category has fewer than 3 conversations, report it as "<3 (suppressed)" — do NOT reveal the exact count or percentage.
+      6. NEVER include any conversation text, quotes, IDs, timestamps, or content in your output.
+
+      Output your results as a JSON object with this structure:
+      {
+        "total_conversations": <number>,
+        "suppression_threshold": 3,
+        "query_results": {
+          "<query_id>": {
+            "question": "<the query question>",
+            ...aggregated results...
+          }
+        }
+      }
+
+  - type: run_llm
+    model: "gemma4-31b"
+    constitution: *oai_constitution
+    prompt: |
+      You are a final output reviewer for a privacy-preserving ChatGPT usage audit, modeled after the "How People Use ChatGPT" research paper.
+
+      CONSTITUTION:
+      {constitution}
+
+      RESEARCH RESULTS:
+      {step_1_output}
+
+      Review the results against every constitutional rule:
+      1. Does any conversation text, quote, or paraphrase appear? (no_conversation_content)
+      2. Are categories with fewer than 3 conversations properly suppressed? (k_anonymity)
+      3. Could any output be used to re-identify specific conversations? (no_reidentification)
+      4. Is any PII present? (no_pii)
+
+      State COMPLIANT or NON-COMPLIANT at the top with a brief explanation. Then write a research-style summary of the findings, as it would appear in a paper like "How People Use ChatGPT".
+
+tinfoil_api_key: null
