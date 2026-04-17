@@ -126,7 +126,7 @@ def create_plan(req: CreatePlanRequest):
     }
 
 
-@app.delete("/plans")
+@app.post("/plans/reset")
 def reset_plans():
     """
     Clear all in-memory plans. Intended for the demo webapp's 'Reset Server'
