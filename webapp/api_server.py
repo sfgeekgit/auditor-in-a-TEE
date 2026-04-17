@@ -126,6 +126,18 @@ def create_plan(req: CreatePlanRequest):
     }
 
 
+@app.delete("/plans")
+def reset_plans():
+    """
+    Clear all in-memory plans. Intended for the demo webapp's 'Reset Server'
+    button so a fresh run can start from a clean slate. Unauthenticated —
+    acceptable while the TEE is publicly shared for this demo.
+    """
+    count = len(plans)
+    plans.clear()
+    return {"deleted": count}
+
+
 @app.get("/plans")
 def list_plans():
     """List all plans with summary info. Used by TEE operator dashboard."""
@@ -252,6 +264,32 @@ def submit_data(plan_id: str, req: SubmitDataRequest):
     return {
         "status": plan["status"],
         "data_submitted_by": list(plan["data"].keys()),
+    }
+
+
+@app.get("/plan/{plan_id}/data/{user_id}")
+def get_submitted_data(plan_id: str, user_id: str):
+    """
+    Return the raw uploaded data for a given user on a plan.
+
+    NOTE: unauthenticated. Intended for the User 1 / User 2 pages in the
+    demo webapp so each side can see what they submitted. Fine while the
+    TEE is publicly shared for this demo; real deployments would gate
+    this behind a signed challenge.
+    """
+    plan = plans.get(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    if user_id not in ("user1", "user2"):
+        raise HTTPException(status_code=400, detail="user_id must be 'user1' or 'user2'")
+
+    if user_id not in plan["data"]:
+        return {"submitted": False, "data": None}
+
+    return {
+        "submitted": True,
+        "data": plan["data"][user_id],
+        "submitted_at": plan["signatures"].get(user_id, {}).get("signed_at"),
     }
 
 
