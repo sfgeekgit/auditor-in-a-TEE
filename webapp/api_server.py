@@ -139,6 +139,10 @@ def list_plans():
                 "has_results": p["results"] is not None,
                 "signed_by": list(p["signatures"].keys()),
                 "data_submitted_by": list(p["data"].keys()),
+                "expected_keys": {
+                    "user1": p["user1_public_key"],
+                    "user2": p["user2_public_key"],
+                },
             }
             for p in sorted(plans.values(), key=lambda x: x["created_at"], reverse=True)
         ]
