@@ -126,6 +126,25 @@ def create_plan(req: CreatePlanRequest):
     }
 
 
+@app.get("/plans")
+def list_plans():
+    """List all plans with summary info. Used by TEE operator dashboard."""
+    return {
+        "plans": [
+            {
+                "id": p["id"],
+                "name": p["name"],
+                "status": p["status"],
+                "created_at": p["created_at"],
+                "has_results": p["results"] is not None,
+                "signed_by": list(p["signatures"].keys()),
+                "data_submitted_by": list(p["data"].keys()),
+            }
+            for p in sorted(plans.values(), key=lambda x: x["created_at"], reverse=True)
+        ]
+    }
+
+
 @app.get("/plan/{plan_id}")
 def get_plan(plan_id: str):
     """View a plan (both users can see this). Private data and API keys are not exposed."""

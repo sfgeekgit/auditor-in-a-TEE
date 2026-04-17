@@ -18,18 +18,18 @@ def _render_results(results: list[dict]) -> None:
         print()
         print(header)
         print("-" * len(header))
-        if r.get("status") == "error":
-            print(f"error: {r.get('error', 'unknown')}")
+        # Both success and error paths put their output in `result`. The enclave
+        # intentionally returns a generic "Step failed." on errors — the real
+        # traceback is in enclave logs (dsl_executor log.exception).
+        result = r.get("result") or r.get("error") or "(no output)"
+        if isinstance(result, str) and len(result) > 2000:
+            print(result[:2000])
+            print(f"... [{len(result) - 2000} more chars truncated; use --json for full]")
         else:
-            result = r.get("result", "")
-            if isinstance(result, str) and len(result) > 2000:
-                print(result[:2000])
-                print(f"... [{len(result) - 2000} more chars truncated; use --json for full]")
-            else:
-                print(result)
-            if r.get("stdout"):
-                print("--- stdout ---")
-                print(r["stdout"])
+            print(result)
+        if r.get("stdout"):
+            print("--- stdout ---")
+            print(r["stdout"])
 
 
 def run(args: argparse.Namespace) -> int:
