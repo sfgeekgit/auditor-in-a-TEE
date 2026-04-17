@@ -45,13 +45,20 @@ need curl
 log "0. Probing $AUDITOR_TEE_URL/health"
 curl -sS --fail "$AUDITOR_TEE_URL/health" && echo
 
-log "1. Generating keypairs"
-mkdir -p keys
-auditor keygen --out "$WORKDIR/keys/alice.json"
-auditor keygen --out "$WORKDIR/keys/openai.json"
+log "1. Using existing keypairs"
+ALICE_KEY="${ALICE_KEY:-$HOME/.auditor/keys/alice.json}"
+OPENAI_KEY="${OPENAI_KEY:-$HOME/.auditor/keys/openai.json}"
 
-ALICE_PK=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['public_key'])" "$WORKDIR/keys/alice.json")
-OAI_PK=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['public_key'])" "$WORKDIR/keys/openai.json")
+for f in "$ALICE_KEY" "$OPENAI_KEY"; do
+  if [[ ! -f "$f" ]]; then
+    echo "missing key file: $f" >&2
+    echo "generate once with:  auditor keygen --out $f" >&2
+    exit 1
+  fi
+done
+
+ALICE_PK=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['public_key'])" "$ALICE_KEY")
+OAI_PK=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['public_key'])" "$OPENAI_KEY")
 echo "  alice  pk: $ALICE_PK"
 echo "  openai pk: $OAI_PK"
 
@@ -77,39 +84,52 @@ log "4. Reviewing"
 auditor plan show
 
 log "5. Both parties sign"
-auditor plan sign --user user1 --key "$WORKDIR/keys/alice.json"
-auditor plan sign --user user2 --key "$WORKDIR/keys/openai.json"
+auditor plan sign --user user1 --key "$ALICE_KEY"
+auditor plan sign --user user2 --key "$OPENAI_KEY"
 
 log "6. Writing sample private data"
 cat > alice-conversations.json <<'JSON'
-[
-  {"id":"c1","timestamp":"2024-03-11","context":"work","messages":[{"role":"user","content":"Debug this Python IndexError"},{"role":"assistant","content":"..."}]},
-  {"id":"c2","timestamp":"2024-03-11","context":"personal","messages":[{"role":"user","content":"Write a poem about the ocean"},{"role":"assistant","content":"..."}]},
-  {"id":"c3","timestamp":"2024-03-12","context":"work","messages":[{"role":"user","content":"Explain SQL JOIN types"},{"role":"assistant","content":"..."},{"role":"user","content":"What about FULL OUTER?"},{"role":"assistant","content":"..."}]},
-  {"id":"c4","timestamp":"2024-03-12","context":"work","messages":[{"role":"user","content":"Draft an email to my manager"},{"role":"assistant","content":"..."}]},
-  {"id":"c5","timestamp":"2024-03-13","context":"personal","messages":[{"role":"user","content":"Probability of rolling a 6 with three dice?"},{"role":"assistant","content":"..."},{"role":"user","content":"Show the formula"},{"role":"assistant","content":"..."}]},
-  {"id":"c6","timestamp":"2024-03-13","context":"work","messages":[{"role":"user","content":"Review this React component for re-renders"},{"role":"assistant","content":"..."}]},
-  {"id":"c7","timestamp":"2024-03-14","context":"personal","messages":[{"role":"user","content":"Short sci-fi story about Mars"},{"role":"assistant","content":"..."}]},
-  {"id":"c8","timestamp":"2024-03-14","context":"work","messages":[{"role":"user","content":"Analyze these sales numbers"},{"role":"assistant","content":"..."},{"role":"user","content":"Summary table please"},{"role":"assistant","content":"..."}]},
-  {"id":"c9","timestamp":"2024-03-15","context":"work","messages":[{"role":"user","content":"Fix a CORS error in FastAPI"},{"role":"assistant","content":"..."}]},
-  {"id":"c10","timestamp":"2024-03-15","context":"personal","messages":[{"role":"user","content":"Should I learn Rust or Go?"},{"role":"assistant","content":"..."}]}
-]
+{
+  "user": "participant-0ab3",
+  "messages": [
+    {"text": "Fix this bug: Traceback (most recent call last): File 'app.py', line 42, in <module> KeyError: 'user_id' — I'm hitting it when the session cookie is missing.", "prior": ""},
+    {"text": "Rewrite this email to my manager so it sounds more professional and less passive: 'hey just checking in on the Q3 numbers whenever you get a sec'", "prior": ""},
+    {"text": "What's the difference between correlation and causation? Use a short example.", "prior": ""},
+    {"text": "Draft a thank-you note for my coworker who covered my shift last weekend. Warm but short.", "prior": ""},
+    {"text": "Explain how a LEFT JOIN works in SQL and when you'd pick it over INNER JOIN.", "prior": ""},
+    {"text": "Write a Dockerfile and a minimal docker-compose.yml for a FastAPI app that talks to Postgres.", "prior": ""},
+    {"text": "How do I do my eyebrows if I've never plucked them before?", "prior": ""},
+    {"text": "Can you write a short sci-fi story about a botanist stranded on Mars?", "prior": ""},
+    {"text": "Recipe for weeknight chicken tikka masala, 45 minutes or less, with pantry substitutions for garam masala.", "prior": ""},
+    {"text": "Summarize the causes of the French Revolution in three paragraphs for an 11th-grade history class.", "prior": ""},
+    {"text": "Translate 'I'll be there in ten minutes, sorry for the delay' into Japanese, polite form.", "prior": ""},
+    {"text": "What is 400000 divided by 23, and what is the square root of 144?", "prior": ""},
+    {"text": "My wife is mad at me because I forgot our anniversary dinner reservation. How should I apologize?", "prior": ""},
+    {"text": "Recommend a good laptop under $1000 for photo editing and light Lightroom work.", "prior": ""},
+    {"text": "I'm feeling burned out at work and can't focus. What small things have helped other people?", "prior": ""},
+    {"text": "Hi! How's it going today?", "prior": ""},
+    {"text": "Draft slides for a 10-minute internal talk introducing our new incident response runbook.", "prior": ""},
+    {"text": "Here's a spreadsheet with my expenses; tell me how much I spent on each category.", "prior": "User attached a 6-month personal expense export from their bank."},
+    {"text": "What should my speech say for Karl at his retirement party? He was an electrician for 35 years.", "prior": ""},
+    {"text": "Brainstorm names for a new coffee shop with a maritime theme.", "prior": ""}
+  ]
+}
 JSON
 
 cat > openai-queries.json <<'JSON'
 {
-  "researcher": "OpenAI Research Team",
-  "queries": [
-    {"id":"q1","question":"What percentage of conversations are work vs personal?","type":"work_personal_split"},
-    {"id":"q2","question":"Distribution of use-case categories?","type":"use_case_distribution"},
-    {"id":"q3","question":"Average turns per conversation by category?","type":"multi_turn_analysis"}
+  "researcher": "OpenAI Economic Research",
+  "classifiers": [
+    "work_nonwork",
+    "asking_doing_expressing",
+    "conversation_topic"
   ]
 }
 JSON
 
 log "7. Both parties submit data"
-auditor data submit --user user1 --key "$WORKDIR/keys/alice.json" --data alice-conversations.json
-auditor data submit --user user2 --key "$WORKDIR/keys/openai.json" --data openai-queries.json
+auditor data submit --user user1 --key "$ALICE_KEY" --data alice-conversations.json
+auditor data submit --user user2 --key "$OPENAI_KEY" --data openai-queries.json
 
 log "8. Running computation inside the TEE"
 auditor run
