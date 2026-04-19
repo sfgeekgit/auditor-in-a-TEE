@@ -8,7 +8,7 @@ submit their data to the TEE, and receive results.
 import os
 import uuid
 import time
-from typing import Optional
+from typing import Literal, Optional
 
 import uvicorn
 from cryptography.exceptions import InvalidSignature
@@ -18,7 +18,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from canonical import canonical_plan_bytes, plan_hash_hex, submit_message
-from dsl_executor import execute_plan
+from dsl_executor import execute_steps
+
+
+STAGES: tuple[str, ...] = ("input", "query", "output")
+Stage = Literal["input", "query", "output"]
 
 
 # Strict signature verification is the default. Set REQUIRE_SIGNATURES=false
@@ -47,6 +51,9 @@ class DataFormat(BaseModel):
 
 class Step(BaseModel):
     type: str = Field(description="Step type: run_python or run_llm")
+    stage: Stage = Field(description="Which pipeline stage this step belongs to: input, query, or output")
+    title: str = Field(description="Short human-readable title for the step")
+    description: Optional[str] = Field(default=None, description="One-paragraph description of what the step does")
     prompt: Optional[str] = Field(default=None, description="Prompt template for run_llm")
     constitution: Optional[str] = Field(default=None, description="Constitution text for run_llm, referenced as {constitution} in the prompt")
     model: Optional[str] = Field(default=None, description="Model name for run_llm")
@@ -112,6 +119,9 @@ def create_plan(req: CreatePlanRequest):
         "signatures": {},
         "data": {},
         "results": None,
+        "stage_status": {s: "pending" for s in STAGES},
+        "stage_results": {s: None for s in STAGES},
+        "step_outputs": {},
         "status": "created",
         "created_at": time.time(),
     }
@@ -177,6 +187,7 @@ def get_plan(plan_id: str):
         "scripts": plan["scripts"],
         "plan_hash": plan["plan_hash"],
         "status": plan["status"],
+        "stage_status": plan.get("stage_status", {s: "pending" for s in STAGES}),
         "expected_keys": {
             "user1": plan["user1_public_key"],
             "user2": plan["user2_public_key"],
@@ -305,52 +316,150 @@ def _update_plan_status(plan):
         plan["status"] = "created"
 
 
-@app.post("/plan/{plan_id}/run")
-def run_plan(plan_id: str):
-    """Execute the plan. Both parties must have signed and submitted data."""
-    plan = plans.get(plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan not found")
+class RunStageRequest(BaseModel):
+    stage: Stage
 
-    if plan["status"] != "data_ready":
-        raise HTTPException(status_code=400, detail=f"Both parties must sign and submit data first (current status: {plan['status']})")
 
-    plan["status"] = "running"
+def _stage_indices(plan: dict, stage: str) -> list[int]:
+    return [i for i, s in enumerate(plan["steps"]) if s.get("stage") == stage]
 
+
+def _stage_has_invalid(results: list[dict]) -> bool:
+    """A stage 'fails' if any step errored OR any step's trimmed output begins with INVALID."""
+    for r in results:
+        if r.get("status") != "success":
+            return True
+        out = str(r.get("result") or "").strip()
+        if out.upper().startswith("INVALID"):
+            return True
+    return False
+
+
+def _run_stage(plan: dict, stage: str) -> list[dict]:
+    """Run only the steps in `stage`, threading through the plan's persistent step_outputs."""
+    indices = _stage_indices(plan, stage)
     context = {
         "data1": plan["data"].get("user1", ""),
         "data2": plan["data"].get("user2", ""),
         "scripts": plan["scripts"],
     }
-
-    results = execute_plan(
+    results = execute_steps(
         steps=plan["steps"],
+        indices=indices,
         context=context,
+        step_outputs=plan["step_outputs"],
         tinfoil_api_key=plan.get("tinfoil_api_key"),
     )
+    plan["stage_results"][stage] = results
+    plan["stage_status"][stage] = "failed" if _stage_has_invalid(results) else "passed"
+    return results
 
-    plan["results"] = results
-    plan["status"] = "completed"
+
+def _flatten_results(plan: dict) -> list[dict]:
+    """Merge per-stage results back into a single ordered list by step index."""
+    by_index: dict[int, dict] = {}
+    for stage in STAGES:
+        for r in (plan["stage_results"].get(stage) or []):
+            by_index[r["step"]] = r
+    return [by_index[i] for i in sorted(by_index)]
+
+
+@app.post("/plan/{plan_id}/run-stage")
+def run_stage(plan_id: str, req: RunStageRequest):
+    """
+    Execute a single stage (input / query / output).
+
+    Gating: 'query' requires 'input' to have passed; 'output' requires 'query'
+    to have passed. A stage with no steps is auto-marked as 'passed'.
+    """
+    plan = plans.get(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    if plan["status"] not in ("data_ready", "running", "completed"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Both parties must sign and submit data first (current status: {plan['status']})",
+        )
+
+    stage = req.stage
+    prior = {"query": "input", "output": "query"}.get(stage)
+    if prior and plan["stage_status"].get(prior) != "passed":
+        raise HTTPException(status_code=409, detail=f"Stage '{prior}' has not passed yet")
+
+    plan["status"] = "running"
+
+    # Auto-pass stages that have no steps, so the three-lane UI still advances.
+    if not _stage_indices(plan, stage):
+        plan["stage_results"][stage] = []
+        plan["stage_status"][stage] = "passed"
+    else:
+        _run_stage(plan, stage)
+
+    # Reflect overall status.
+    if all(plan["stage_status"][s] == "passed" for s in STAGES):
+        plan["results"] = _flatten_results(plan)
+        plan["status"] = "completed"
+    elif any(plan["stage_status"][s] == "failed" for s in STAGES):
+        plan["results"] = _flatten_results(plan)
+        plan["status"] = "blocked"
+    else:
+        plan["status"] = "running"
 
     return {
-        "status": "completed",
-        "results": results,
+        "stage": stage,
+        "stage_status": plan["stage_status"][stage],
+        "overall_status": plan["status"],
+        "results": plan["stage_results"][stage],
     }
+
+
+@app.post("/plan/{plan_id}/run")
+def run_plan(plan_id: str):
+    """Execute the full plan end-to-end by running each stage in order, stopping on failure."""
+    plan = plans.get(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    if plan["status"] not in ("data_ready", "running", "completed"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Both parties must sign and submit data first (current status: {plan['status']})",
+        )
+
+    plan["status"] = "running"
+    for stage in STAGES:
+        if plan["stage_status"][stage] == "passed":
+            continue
+        if not _stage_indices(plan, stage):
+            plan["stage_results"][stage] = []
+            plan["stage_status"][stage] = "passed"
+            continue
+        _run_stage(plan, stage)
+        if plan["stage_status"][stage] == "failed":
+            plan["results"] = _flatten_results(plan)
+            plan["status"] = "blocked"
+            return {"status": "blocked", "failed_stage": stage, "results": plan["results"]}
+
+    plan["results"] = _flatten_results(plan)
+    plan["status"] = "completed"
+    return {"status": "completed", "results": plan["results"]}
 
 
 @app.get("/plan/{plan_id}/results")
 def get_results(plan_id: str):
-    """Get execution results. Available to both parties."""
+    """
+    Per-stage + flattened results. Availability is governed client-side by
+    the UI's visibility rules (e.g. query outputs stay hidden until 'output'
+    passes); the server returns whatever has been computed so far.
+    """
     plan = plans.get(plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
 
-    if plan["results"] is None:
-        raise HTTPException(status_code=400, detail="Plan has not been executed yet")
-
     return {
         "status": plan["status"],
-        "results": plan["results"],
+        "stage_status": plan["stage_status"],
+        "stage_results": plan["stage_results"],
+        "results": plan.get("results"),
     }
 
 

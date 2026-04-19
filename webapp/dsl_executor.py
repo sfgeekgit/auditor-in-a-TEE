@@ -22,22 +22,31 @@ DEFAULT_MODEL = os.environ.get("MODEL_NAME", "gemma4-31b")
 TINFOIL_API_KEY = os.environ.get("TINFOIL_API_KEY", "")
 
 
-def execute_plan(steps: list[dict], context: dict, tinfoil_api_key: str | None = None) -> list[dict]:
+def execute_steps(
+    steps: list[dict],
+    indices: list[int],
+    context: dict,
+    step_outputs: dict,
+    tinfoil_api_key: str | None = None,
+) -> list[dict]:
     """
-    Execute a sequence of DSL steps.
+    Execute a subset of a plan's steps (selected by index), mutating the shared
+    `step_outputs` dict so later stages can reference earlier `{step_N_output}`
+    placeholders.
 
     Args:
-        steps: list of step dicts, each with 'type' and type-specific fields
+        steps: full list of step dicts (indices refer into this list)
+        indices: which step positions to actually run this call
         context: dict with 'data1', 'data2', and any uploaded 'scripts'
+        step_outputs: mutated in place; keyed as 'step_N_output'
         tinfoil_api_key: API key for Tinfoil LLM calls
 
     Returns:
-        list of result dicts, one per step
+        list of result dicts for the executed indices, in order
     """
     results = []
-    step_outputs = {}
-
-    for i, step in enumerate(steps):
+    for i in indices:
+        step = steps[i]
         step_type = step.get("type")
         try:
             if step_type == "run_python":
@@ -48,13 +57,13 @@ def execute_plan(steps: list[dict], context: dict, tinfoil_api_key: str | None =
                 output = {"result": "Step skipped: unknown type."}
 
             step_outputs[f"step_{i}_output"] = output.get("result") or ""
-            results.append({"step": i, "type": step_type, "status": "success", **output})
-        except Exception as e:
-            # Log the real error server-side, never expose to users
+            results.append({"step": i, "type": step_type, "stage": step.get("stage"),
+                            "status": "success", **output})
+        except Exception:
             log.exception("Step %d (%s) failed", i, step_type)
             step_outputs[f"step_{i}_output"] = "Step failed."
-            results.append({"step": i, "type": step_type, "status": "error",
-                            "result": "Step failed."})
+            results.append({"step": i, "type": step_type, "stage": step.get("stage"),
+                            "status": "error", "result": "Step failed."})
 
     return results
 

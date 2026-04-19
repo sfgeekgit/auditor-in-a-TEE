@@ -27,6 +27,11 @@ steps:
   # monitoring policy for aggregate usage research.
   # ------------------------------------------------------------------
   - type: run_llm
+    stage: input
+    title: "Monitoring Policy Check"
+    description: >-
+      Audits the researcher's submitted classifier spec against the published
+      monitoring policy. Emits VALID or INVALID. Gates whether any query runs.
     model: "gemma4-31b"
     constitution: |
       preamble: |
@@ -106,6 +111,12 @@ steps:
   # is not in this plan — it lives in user2's private data.
   # ------------------------------------------------------------------
   - type: run_llm
+    stage: query
+    title: "Classifier Query"
+    description: >-
+      Applies the researcher's approved classifier prompt to each user message
+      and returns aggregate label counts. Output is not surfaced to the
+      operator until the privacy sentinel passes.
     model: "gemma4-31b"
     constitution: |
       preamble: |
@@ -186,6 +197,11 @@ steps:
   # Audits the classifier output for privacy leaks.
   # ------------------------------------------------------------------
   - type: run_llm
+    stage: output
+    title: "Privacy Sentinel"
+    description: >-
+      Reviews the classifier output against the privacy constitution. Emits
+      VALID or INVALID. Only on VALID does the operator see the final result.
     model: "gemma4-31b"
     constitution: |
       preamble: |

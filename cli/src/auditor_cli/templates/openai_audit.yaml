@@ -30,7 +30,50 @@ data2_format:
   schema_hint: "json"
 
 steps:
+  # ------------------------------------------------------------------
+  # step 0 — Input filter: classifier whitelist check.
+  # Refuses the run if the researcher asked for anything outside the
+  # three published classifiers in Appendix A.
+  # ------------------------------------------------------------------
+  - type: run_python
+    stage: input
+    title: "Classifier Whitelist Check"
+    description: >-
+      Parses the researcher spec and verifies every requested classifier is
+      one of the three published in Appendix A (work_nonwork,
+      asking_doing_expressing, conversation_topic). Emits VALID or INVALID.
+    code: |
+      import json
+
+      ALLOWED = {"work_nonwork", "asking_doing_expressing", "conversation_topic"}
+
+      try:
+          spec = json.loads(data2)
+      except Exception:
+          result = "INVALID: researcher spec is not valid JSON"
+      else:
+          requested = spec.get("classifiers")
+          if not isinstance(requested, list) or not requested:
+              result = "INVALID: 'classifiers' must be a non-empty list"
+          else:
+              bad = [c for c in requested if c not in ALLOWED]
+              if bad:
+                  result = f"INVALID: classifier(s) not in Appendix A: {bad}"
+              else:
+                  result = "VALID"
+
+  # ------------------------------------------------------------------
+  # step 1 — Query: run the paper's Appendix A classifiers against each
+  # user message. Output stays hidden from the operator until the privacy
+  # sentinel has passed.
+  # ------------------------------------------------------------------
   - type: run_llm
+    stage: query
+    title: "Appendix A Classifiers"
+    description: >-
+      Applies the three Appendix A classifiers from "How People Use
+      ChatGPT" (Chatterji et al., 2025) to the user's messages. Output
+      contains only aggregate label counts with k-anonymity suppression.
     model: "gemma4-31b"
     constitution: |
       preamble: |
@@ -179,22 +222,20 @@ steps:
          `BLOCKED: <short reason>`
 
   # ------------------------------------------------------------------
-  # Privacy Sentinel — a general-purpose validator node.
-  #
-  # This step takes the previous step's output and checks it against a
-  # fixed set of privacy rules: no PII, no raw source data, k-anonymity
-  # threshold = 3, no identifiers that could re-identify a record.
-  #
-  # It emits exactly one of:
-  #   VALID
-  #   INVALID: <one-line reason>
-  #
-  # The webapp detects "INVALID:" and suppresses all prior step output,
-  # showing only the reason as an error. This pattern is intended to be
-  # copy-pasted as the final step of any plan that produces sensitive
-  # aggregate output.
+  # step 2 — Output filter: privacy sentinel.
+  # Takes the classifier output and checks it against a fixed set of
+  # privacy rules: no PII, no raw source data, k-anonymity threshold = 3,
+  # no identifiers that could re-identify a record.
+  # Emits VALID or INVALID. On INVALID, the webapp suppresses all prior
+  # output and shows only the reason.
   # ------------------------------------------------------------------
   - type: run_llm
+    stage: output
+    title: "Privacy Sentinel"
+    description: >-
+      Reviews the classifier output against a fixed privacy constitution
+      (no PII, no raw data, k-anonymity, no identifiers). Emits VALID or
+      INVALID. Only on VALID is the classifier output released.
     model: "gemma4-31b"
     constitution: |
       preamble: |
@@ -230,7 +271,7 @@ steps:
       {constitution}
 
       OUTPUT TO REVIEW:
-      {step_0_output}
+      {step_1_output}
 
       Check every rule:
       1. no_pii — any names, emails, phone numbers, addresses, handles?

@@ -21,11 +21,20 @@ data2_format:
   schema_hint: "json"
 
 steps:
+  # ------------------------------------------------------------------
+  # step 0 — Input filter: schema validation for both companies' payloads.
+  # Emits VALID or INVALID. Gates the rest of the pipeline.
+  # ------------------------------------------------------------------
   - type: run_python
+    stage: input
+    title: "Schema Validation"
+    description: >-
+      Verifies each company's payload is valid JSON, has the required
+      "company" and "employees" fields, and that every employee record has
+      "role", "department", and "annual_comp". Emits VALID or INVALID.
     code: |
       import json
 
-      # --- Validate data format ---
       REQUIRED_KEYS = {"company", "employees"}
       REQUIRED_EMP_KEYS = {"role", "department", "annual_comp"}
 
@@ -49,65 +58,92 @@ steps:
                   errors.append(f"{label} employee {i}: missing {emp_missing}")
 
       if errors:
-          result = "VALIDATION FAILED:\n" + "\n".join(errors)
+          result = "INVALID: " + "; ".join(errors)
       else:
-          # --- Compute benchmarking ---
-          d1 = json.loads(data1)
-          d2 = json.loads(data2)
+          result = "VALID"
 
-          def percentiles(values):
-              s = sorted(values)
-              n = len(s)
-              return {
-                  "p25": s[int(n * 0.25)],
-                  "p50": s[int(n * 0.50)],
-                  "p75": s[int(n * 0.75)],
-                  "avg": round(sum(s) / n),
+  # ------------------------------------------------------------------
+  # step 1 — Query: compute percentile bands per company and per department,
+  # with k-anonymity suppression (< 3 employees).
+  # ------------------------------------------------------------------
+  - type: run_python
+    stage: query
+    title: "Percentile Benchmarking"
+    description: >-
+      Computes p25 / p50 / p75 / avg per company and per department, and the
+      median-gap percentage. Suppresses any department with fewer than 3
+      employees per company as "insufficient data". Output is withheld from
+      the operator until the output stage passes.
+    code: |
+      import json
+
+      d1 = json.loads(data1)
+      d2 = json.loads(data2)
+
+      def percentiles(values):
+          s = sorted(values)
+          n = len(s)
+          return {
+              "p25": s[int(n * 0.25)],
+              "p50": s[int(n * 0.50)],
+              "p75": s[int(n * 0.75)],
+              "avg": round(sum(s) / n),
+          }
+
+      MIN_GROUP = 3
+
+      comps1 = [e["annual_comp"] for e in d1["employees"]]
+      comps2 = [e["annual_comp"] for e in d2["employees"]]
+
+      overall = {
+          d1["company"]: percentiles(comps1),
+          d2["company"]: percentiles(comps2),
+      }
+      overall["median_gap_pct"] = round(
+          (overall[d2["company"]]["p50"] - overall[d1["company"]]["p50"])
+          / overall[d1["company"]]["p50"] * 100, 1
+      )
+
+      depts = set()
+      dept_vals = {}
+      for co, obj in [(d1["company"], d1), (d2["company"], d2)]:
+          for e in obj["employees"]:
+              dept = e["department"]
+              depts.add(dept)
+              dept_vals.setdefault(dept, {}).setdefault(co, []).append(e["annual_comp"])
+
+      by_department = {}
+      for dept in sorted(depts):
+          vals = dept_vals.get(dept, {})
+          c1_vals = vals.get(d1["company"], [])
+          c2_vals = vals.get(d2["company"], [])
+          if len(c1_vals) < MIN_GROUP or len(c2_vals) < MIN_GROUP:
+              by_department[dept] = "insufficient data (< 3 employees per company)"
+          else:
+              by_department[dept] = {
+                  d1["company"]: percentiles(c1_vals),
+                  d2["company"]: percentiles(c2_vals),
               }
 
-          MIN_GROUP = 3
+      result = json.dumps({
+          "overall": overall,
+          "by_department": by_department,
+          "methodology": "Percentile bands (p25/p50/p75) and averages. Groups with < 3 employees suppressed.",
+          "employee_counts": {d1["company"]: len(comps1), d2["company"]: len(comps2)},
+      }, indent=2)
 
-          comps1 = [e["annual_comp"] for e in d1["employees"]]
-          comps2 = [e["annual_comp"] for e in d2["employees"]]
-
-          overall = {
-              d1["company"]: percentiles(comps1),
-              d2["company"]: percentiles(comps2),
-          }
-          overall["median_gap_pct"] = round(
-              (overall[d2["company"]]["p50"] - overall[d1["company"]]["p50"])
-              / overall[d1["company"]]["p50"] * 100, 1
-          )
-
-          depts = set()
-          dept_vals = {}
-          for co, obj in [(d1["company"], d1), (d2["company"], d2)]:
-              for e in obj["employees"]:
-                  dept = e["department"]
-                  depts.add(dept)
-                  dept_vals.setdefault(dept, {}).setdefault(co, []).append(e["annual_comp"])
-
-          by_department = {}
-          for dept in sorted(depts):
-              vals = dept_vals.get(dept, {})
-              c1_vals = vals.get(d1["company"], [])
-              c2_vals = vals.get(d2["company"], [])
-              if len(c1_vals) < MIN_GROUP or len(c2_vals) < MIN_GROUP:
-                  by_department[dept] = "insufficient data (< 3 employees per company)"
-              else:
-                  by_department[dept] = {
-                      d1["company"]: percentiles(c1_vals),
-                      d2["company"]: percentiles(c2_vals),
-                  }
-
-          result = json.dumps({
-              "overall": overall,
-              "by_department": by_department,
-              "methodology": "Percentile bands (p25/p50/p75) and averages. Groups with < 3 employees suppressed.",
-              "employee_counts": {d1["company"]: len(comps1), d2["company"]: len(comps2)},
-          }, indent=2)
-
+  # ------------------------------------------------------------------
+  # step 2 — Output filter: reviewer + privacy sentinel. Writes the final
+  # executive summary if everything is compliant, otherwise refuses.
+  # ------------------------------------------------------------------
   - type: run_llm
+    stage: output
+    title: "Compliance Review & Summary"
+    description: >-
+      Reviews the benchmarking output against the agreed privacy
+      constitution (no individual salaries, k-anonymity, aggregate only)
+      and emits either a COMPLIANT executive summary or a NON-COMPLIANT
+      verdict with no data attached.
     model: "gemma4-31b"
     constitution: |
       preamble: |
@@ -137,7 +173,7 @@ steps:
       {constitution}
 
       ANALYSIS RESULTS:
-      {step_0_output}
+      {step_1_output}
 
       First, verify compliance with all constitution rules:
       1. Do any individual salary figures appear? (rule: no_individual_salaries)

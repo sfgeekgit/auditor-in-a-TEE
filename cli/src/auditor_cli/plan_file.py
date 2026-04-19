@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import yaml
 from pydantic import BaseModel, Field
+
+
+Stage = Literal["input", "query", "output"]
 
 
 class DataFormat(BaseModel):
@@ -22,6 +25,9 @@ class DataFormat(BaseModel):
 
 class Step(BaseModel):
     type: str
+    stage: Stage
+    title: str
+    description: Optional[str] = None
     prompt: Optional[str] = None
     constitution: Optional[str] = None
     model: Optional[str] = None
