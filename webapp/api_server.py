@@ -444,6 +444,27 @@ def run_plan(plan_id: str):
     return {"status": "completed", "results": plan["results"]}
 
 
+@app.post("/plan/{plan_id}/reset")
+def reset_plan_execution(plan_id: str):
+    """
+    Clear execution state for a single plan so it can be re-run from scratch.
+    Signatures, data, and the plan itself are preserved — only stage results,
+    stage status, step outputs, and the flattened results are wiped.
+    Intended for demo / debugging loops.
+    """
+    plan = plans.get(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    plan["results"] = None
+    plan["stage_results"] = {s: None for s in STAGES}
+    plan["stage_status"] = {s: "pending" for s in STAGES}
+    plan["step_outputs"] = {}
+    _update_plan_status(plan)  # back to data_ready / signed / created
+
+    return {"status": plan["status"], "stage_status": plan["stage_status"]}
+
+
 @app.get("/plan/{plan_id}/results")
 def get_results(plan_id: str):
     """
