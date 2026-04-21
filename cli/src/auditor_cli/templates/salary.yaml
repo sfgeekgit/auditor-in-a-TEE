@@ -140,7 +140,7 @@ steps:
       }, indent=2)
 
   # ------------------------------------------------------------------
-  # step 2 — Output filter: reviewer + privacy sentinel. Writes the final
+  # step 2 — Output filter: reviewer + PII policy check. Writes the final
   # executive summary if everything is compliant, otherwise refuses.
   # ------------------------------------------------------------------
   - type: run_llm

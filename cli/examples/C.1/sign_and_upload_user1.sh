@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # User 1 (Alice): sign the current plan and upload ChatGPT messages.
-# Identical message set to the openai_audit example — the contrast is
+# Identical message set to the openbrain_audit example — the contrast is
 # entirely in what user2 asks for.
 #
 # Run plan_creation.sh first.
@@ -27,7 +27,7 @@ fi
 DATA_FILE="$(mktemp -t alice-conversations-XXXXXX.json)"
 trap 'rm -f "$DATA_FILE"' EXIT
 
-log "Writing Alice's ChatGPT messages (same set as openai_audit)"
+log "Writing Alice's ChatGPT messages (same set as openbrain_audit)"
 cat > "$DATA_FILE" <<'JSON'
 {
   "user": "participant-0ab3",

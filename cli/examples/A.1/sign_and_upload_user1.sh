@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # User 1 (Alice): sign the current plan and upload private ChatGPT messages.
-# Run openai_plan_creation.sh first — the CLI state file remembers the plan_id.
+# Run openbrain_plan_creation.sh first — the CLI state file remembers the plan_id.
 #
 # Env:
 #   AUDITOR_TEE_URL   defaults to the Ben deployment

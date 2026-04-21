@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# User 2 (OpenAI) on plan A.1: sign and upload the researcher spec.
+# User 2 (OpenBrain) on plan A.1: sign and upload the researcher spec.
 # For A.1 the submitted prompt is the Appendix A.1 classifier from
 # "How People Use ChatGPT" (Chatterji et al., 2025), reproduced verbatim.
 # User 1 does not see this prompt text — user 1 agreed to the plan's
@@ -11,25 +11,25 @@ set -euo pipefail
 : "${AUDITOR_TEE_URL:=https://ben-auditor-agent.rinberg-lab.containers.tinfoil.dev}"
 export AUDITOR_TEE_URL
 
-OPENAI_KEY="${OPENAI_KEY:-$HOME/.auditor/keys/openai.json}"
+OPENBRAIN_KEY="${OPENBRAIN_KEY:-$HOME/.auditor/keys/openbrain.json}"
 
 log() { printf "\n\033[1;34m▸ %s\033[0m\n" "$*"; }
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing: $1" >&2; exit 127; }; }
 
 need auditor
 
-if [[ ! -f "$OPENAI_KEY" ]]; then
-  echo "missing key: $OPENAI_KEY" >&2
+if [[ ! -f "$OPENBRAIN_KEY" ]]; then
+  echo "missing key: $OPENBRAIN_KEY" >&2
   exit 1
 fi
 
-DATA_FILE="$(mktemp -t openai-a1-queries-XXXXXX.json)"
+DATA_FILE="$(mktemp -t openbrain-a1-queries-XXXXXX.json)"
 trap 'rm -f "$DATA_FILE"' EXIT
 
-log "Writing OpenAI's A.1 researcher spec (Appendix A.1 verbatim)"
+log "Writing OpenBrain's A.1 researcher spec (Appendix A.1 verbatim)"
 cat > "$DATA_FILE" <<'JSON'
 {
-  "researcher": "OpenAI Economic Research",
+  "researcher": "OpenBrain Economic Research",
   "purpose": "Replicate Appendix A.1 (Work / Non-Work) for aggregate usage characterization.",
   "classifier_name": "Work vs Non-Work",
   "label_set": ["1", "0"],
@@ -37,10 +37,10 @@ cat > "$DATA_FILE" <<'JSON'
 }
 JSON
 
-log "Signing plan as user2 (OpenAI)"
-auditor plan sign --user user2 --key "$OPENAI_KEY"
+log "Signing plan as user2 (OpenBrain)"
+auditor plan sign --user user2 --key "$OPENBRAIN_KEY"
 
 log "Submitting researcher spec"
-auditor data submit --user user2 --key "$OPENAI_KEY" --data "$DATA_FILE"
+auditor data submit --user user2 --key "$OPENBRAIN_KEY" --data "$DATA_FILE"
 
 log "Done. Plan should now be data_ready — run ./execute.sh or click 'Run Computation' in the webapp."

@@ -64,7 +64,7 @@ def test_shipped_templates_are_valid():
     """The templates bundled in src/auditor_cli/templates must load cleanly."""
     from importlib import resources
 
-    for name in ("salary", "openai_audit"):
+    for name in ("salary", "openbrain_audit"):
         path = resources.files("auditor_cli").joinpath("templates", f"{name}.yaml")
         with resources.as_file(path) as p:
             load_plan_file(Path(p))

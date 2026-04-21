@@ -10,7 +10,7 @@ summary: >-
   verifies the output contains no raw text, identifiers, or small
   buckets before release.
 user1_public_key: "__ALICE_PK__"
-user2_public_key: "__OPENAI_PK__"
+user2_public_key: "__OPENBRAIN_PK__"
 
 data1_format:
   description: >-
@@ -126,7 +126,7 @@ steps:
     description: >-
       Applies the researcher's approved classifier prompt to each user message
       and returns aggregate label counts. Output is not surfaced to the
-      operator until the privacy sentinel passes.
+      operator until the PII policy check passes.
     model: "gemma4-31b"
     constitution: |
       preamble: |
@@ -203,7 +203,7 @@ steps:
       6. On rule violation, output only: `BLOCKED: <short reason>`
 
   # ------------------------------------------------------------------
-  # step 2 — Privacy Sentinel (reusable).
+  # step 2 — PII Policy Check (reusable).
   # Audits the classifier output for privacy leaks.
   # ------------------------------------------------------------------
   - type: run_llm
@@ -215,7 +215,7 @@ steps:
     model: "gemma4-31b"
     constitution: |
       preamble: |
-        Privacy sentinel running inside a TEE. Reviews the prior step's
+        PII policy check running inside a TEE. Reviews the prior step's
         output and blocks release if it leaks private data. Emits only a
         VALID / INVALID verdict — never echoes reviewed content.
 
@@ -232,7 +232,7 @@ steps:
           description: "The sentinel must output only the verdict line."
 
     prompt: |
-      You are a privacy sentinel running inside a Trusted Execution
+      You are a PII policy check running inside a Trusted Execution
       Environment. Review the OUTPUT against the CONSTITUTION.
 
       CONSTITUTION:

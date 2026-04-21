@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_plan_sign.set_defaults(func=plan_cmd.run_sign)
 
     p_plan_tpl = p_plan_sub.add_parser("template", help="Write a built-in plan template to disk")
-    p_plan_tpl.add_argument("name", choices=["salary", "openai_audit"])
+    p_plan_tpl.add_argument("name", choices=["salary", "openbrain_audit"])
     p_plan_tpl.add_argument("--out", default=None, help="Output path (default: <name>.yaml in CWD)")
     p_plan_tpl.add_argument("--force", action="store_true", help="Overwrite if file exists")
     p_plan_tpl.set_defaults(func=plan_cmd.run_template)

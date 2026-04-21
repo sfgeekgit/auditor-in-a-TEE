@@ -77,9 +77,9 @@ pipx install /path/to/auditor-in-a-TEE/cli
 
 Requires Python ≥3.10.
 
-## End-to-end example: OpenAI chat usage audit
+## End-to-end example: OpenBrain chat usage audit
 
-This is the `openai_audit` template. A user has opted in to let OpenAI researchers analyze ChatGPT usage patterns for aggregate research (modeled on the "How People Use ChatGPT" paper). The user keeps their conversation logs private; OpenAI submits research queries. The TEE runs approved queries and returns only aggregate statistics — no conversation text, no re-identification, no PII.
+This is the `openbrain_audit` template. A user has opted in to let OpenBrain researchers analyze ChatGPT usage patterns for aggregate research (modeled on the "How People Use ChatGPT" paper). The user keeps their conversation logs private; OpenBrain submits research queries. The TEE runs approved queries and returns only aggregate statistics — no conversation text, no re-identification, no PII.
 
 We'll run both sides on one machine for demonstration. In reality each party runs the CLI on their own machine with their own private key.
 
@@ -112,26 +112,26 @@ export AUDITOR_TEE_URL=https://your-enclave-host.tinfoil.dev
 # Party 1 (the user)
 auditor keygen --out ~/.auditor/keys/alice.json
 
-# Party 2 (OpenAI research)
-auditor keygen --out ~/.auditor/keys/openai.json
+# Party 2 (OpenBrain research)
+auditor keygen --out ~/.auditor/keys/openbrain.json
 ```
 
 Capture the public keys:
 
 ```bash
 ALICE_PK=$(python3 -c 'import json;print(json.load(open("'$HOME'/.auditor/keys/alice.json"))["public_key"])')
-OAI_PK=$(python3   -c 'import json;print(json.load(open("'$HOME'/.auditor/keys/openai.json"))["public_key"])')
+OAI_PK=$(python3   -c 'import json;print(json.load(open("'$HOME'/.auditor/keys/openbrain.json"))["public_key"])')
 echo "alice:  $ALICE_PK"
-echo "openai: $OAI_PK"
+echo "openbrain: $OAI_PK"
 ```
 
-In a real deployment these two commands run on different machines. Alice sends her public key to OpenAI (or vice versa) over any public channel — public keys are not secrets.
+In a real deployment these two commands run on different machines. Alice sends her public key to OpenBrain (or vice versa) over any public channel — public keys are not secrets.
 
 ### 2. Create the plan from the shipped template
 
 ```bash
-mkdir -p /tmp/openai-audit && cd /tmp/openai-audit
-auditor plan template openai_audit --out plan.yaml
+mkdir -p /tmp/openbrain-audit && cd /tmp/openbrain-audit
+auditor plan template openbrain_audit --out plan.yaml
 ```
 
 Edit `plan.yaml`: replace `deadbeef...` with `$ALICE_PK` and `cafebabe...` with `$OAI_PK`. Or do it programmatically:
@@ -154,7 +154,7 @@ Output:
 Plan created
   plan_id:   a1b2c3d4
   plan_hash: <64 hex>
-  name:      OpenAI Chat Usage Audit
+  name:      OpenBrain Chat Usage Audit
   url:       http://127.0.0.1:8088
   state:     ./.auditor/state.json
 ```
@@ -177,8 +177,8 @@ Sign (each party runs their own command on their own machine):
 # Alice
 auditor plan sign --user user1 --key ~/.auditor/keys/alice.json
 
-# OpenAI
-auditor plan sign --user user2 --key ~/.auditor/keys/openai.json
+# OpenBrain
+auditor plan sign --user user2 --key ~/.auditor/keys/openbrain.json
 ```
 
 The CLI first verifies that the keypair you loaded matches the plan's `expected_keys[user1]` (or `user2`) — if you point it at the wrong key it refuses before sending anything. The signature is over the canonical plan bytes.
@@ -187,7 +187,7 @@ After both signatures land, the plan status flips to `signed`.
 
 ### 4. Submit private data
 
-Sample conversation logs for Alice and research queries for OpenAI:
+Sample conversation logs for Alice and research queries for OpenBrain:
 
 ```bash
 cat > alice-conversations.json <<'JSON'
@@ -203,9 +203,9 @@ cat > alice-conversations.json <<'JSON'
 ]
 JSON
 
-cat > openai-queries.json <<'JSON'
+cat > openbrain-queries.json <<'JSON'
 {
-  "researcher": "OpenAI Research Team",
+  "researcher": "OpenBrain Research Team",
   "queries": [
     {"id":"q1","question":"What percentage of conversations are work vs personal?","type":"work_personal_split"},
     {"id":"q2","question":"Distribution of use-case categories?","type":"use_case_distribution"},
@@ -221,8 +221,8 @@ Submit:
 # Alice (user1) submits her logs
 auditor data submit --user user1 --key ~/.auditor/keys/alice.json --data alice-conversations.json
 
-# OpenAI (user2) submits the research queries
-auditor data submit --user user2 --key ~/.auditor/keys/openai.json --data openai-queries.json
+# OpenBrain (user2) submits the research queries
+auditor data submit --user user2 --key ~/.auditor/keys/openbrain.json --data openbrain-queries.json
 ```
 
 Stdin works too: `cat alice-conversations.json | auditor data submit --user user1 --key ... --data -`.
@@ -237,9 +237,9 @@ Anyone who has the plan_id and URL can trigger execution — nothing private is 
 auditor run
 ```
 
-The `openai_audit` plan has three LLM steps:
+The `openbrain_audit` plan has three LLM steps:
 
-1. Compliance check: verifies OpenAI's queries fall within the approved types.
+1. Compliance check: verifies OpenBrain's queries fall within the approved types.
 2. Analysis: classifies conversations into use-case categories, computes aggregates, suppresses any category with <3 conversations (k-anonymity).
 3. Final review: re-checks the output against every constitutional rule before releasing it.
 
@@ -258,7 +258,7 @@ The `--json` flag is useful for piping into `jq` or feeding into downstream anal
 | Command | What it does |
 |---|---|
 | `auditor keygen [--out PATH] [--force]` | Generate an ed25519 keypair |
-| `auditor plan template {salary,openai_audit} [--out FILE] [--force]` | Write a built-in plan template to disk |
+| `auditor plan template {salary,openbrain_audit} [--out FILE] [--force]` | Write a built-in plan template to disk |
 | `auditor plan create FILE.yaml [--url URL]` | POST the plan, save `plan_id` to `./.auditor/state.json` |
 | `auditor plan show [PLAN_ID] [--url URL] [--json]` | Fetch and render a plan |
 | `auditor plan sign --user {user1,user2} [--key PATH] [--plan-id ID] [--url URL]` | Sign the plan as a specific party |
@@ -291,7 +291,7 @@ For each of `--url`, `--plan-id`, `--key`: flag > environment variable > `./.aud
 
 ### Templates
 
-Ship-bundled plan templates: `salary` (competitive salary benchmarking) and `openai_audit` (above). Run `auditor plan template <name> --out some.yaml` to get a starting point.
+Ship-bundled plan templates: `salary` (competitive salary benchmarking) and `openbrain_audit` (above). Run `auditor plan template <name> --out some.yaml` to get a starting point.
 
 ### Server URLs
 
