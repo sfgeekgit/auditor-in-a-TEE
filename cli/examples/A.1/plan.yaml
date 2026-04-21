@@ -1,4 +1,14 @@
-name: "A.1"
+name: "LLM Usage Analysis"
+summary: >-
+  Two parties collaborate on an aggregate-only study of chat-message
+  usage. User 1 uploads their ChatGPT-style messages. User 2 (the
+  researcher) uploads a classifier prompt plus a fixed label set. The
+  TEE first audits the classifier prompt against the published
+  monitoring policy (VALID / INVALID). If approved, it applies the
+  prompt verbatim to each message and returns only aggregate label
+  counts with k-anonymity suppression. A PII Policy Check then
+  verifies the output contains no raw text, identifiers, or small
+  buckets before release.
 user1_public_key: "__ALICE_PK__"
 user2_public_key: "__OPENAI_PK__"
 
@@ -198,7 +208,7 @@ steps:
   # ------------------------------------------------------------------
   - type: run_llm
     stage: output
-    title: "Privacy Sentinel"
+    title: "PII Policy Check"
     description: >-
       Reviews the classifier output against the privacy constitution. Emits
       VALID or INVALID. Only on VALID does the operator see the final result.

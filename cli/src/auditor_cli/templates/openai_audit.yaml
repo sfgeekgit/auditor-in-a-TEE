@@ -11,6 +11,14 @@
 # below with the real ed25519 pubkeys of both signers.
 
 name: "OpenAI ChatGPT Usage Audit"
+summary: >-
+  Privacy-preserving replication of the Appendix A classifiers from
+  "How People Use ChatGPT" (Chatterji et al., 2025). User 1 shares a
+  batch of their ChatGPT messages; User 2 (the researcher) picks
+  which paper classifiers to run. The TEE first checks the requested
+  classifiers are on the whitelist (VALID / INVALID), applies them
+  verbatim to each message, and returns aggregate label counts with
+  k-anonymity suppression. A PII Policy Check gates release.
 user1_public_key: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 user2_public_key: "cafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe"
 
@@ -231,7 +239,7 @@ steps:
   # ------------------------------------------------------------------
   - type: run_llm
     stage: output
-    title: "Privacy Sentinel"
+    title: "PII Policy Check"
     description: >-
       Reviews the classifier output against a fixed privacy constitution
       (no PII, no raw data, k-anonymity, no identifiers). Emits VALID or

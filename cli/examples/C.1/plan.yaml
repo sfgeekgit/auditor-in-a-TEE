@@ -1,4 +1,9 @@
 name: "C.1"
+summary: >-
+  Third variant of the chat-message classification flow. Same three-stage
+  shape as LLM Usage Analysis: a monitoring-policy audit on the submitted
+  classifier prompt, a classifier query that runs it over user 1's
+  messages, and a PII Policy Check that gates release.
 user1_public_key: "__ALICE_PK__"
 user2_public_key: "__OPENAI_PK__"
 
@@ -198,7 +203,7 @@ steps:
   # ------------------------------------------------------------------
   - type: run_llm
     stage: output
-    title: "Privacy Sentinel"
+    title: "PII Policy Check"
     description: >-
       Reviews the classifier output against the privacy constitution. Emits
       VALID or INVALID. Only on VALID does the operator see the final result.

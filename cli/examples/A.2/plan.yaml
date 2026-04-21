@@ -1,4 +1,12 @@
-name: "A.2"
+name: "LLM Classifier Audit"
+summary: >-
+  Variant of the LLM Usage Analysis flow with stricter label-set
+  constraints. User 1 uploads their chat messages; User 2 uploads a
+  classifier prompt and enumerated label set. The TEE audits the
+  prompt against the monitoring policy (VALID / INVALID), applies it
+  verbatim to each message if approved, and returns aggregate label
+  counts with k-anonymity suppression. A PII Policy Check gates
+  release.
 user1_public_key: "__ALICE_PK__"
 user2_public_key: "__OPENAI_PK__"
 
@@ -198,7 +206,7 @@ steps:
   # ------------------------------------------------------------------
   - type: run_llm
     stage: output
-    title: "Privacy Sentinel"
+    title: "PII Policy Check"
     description: >-
       Reviews the classifier output against the privacy constitution. Emits
       VALID or INVALID. Only on VALID does the operator see the final result.

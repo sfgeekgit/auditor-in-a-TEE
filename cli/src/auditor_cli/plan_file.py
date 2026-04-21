@@ -39,6 +39,7 @@ class Step(BaseModel):
 
 class PlanFile(BaseModel):
     name: str
+    summary: Optional[str] = None
     user1_public_key: str = Field(min_length=64, max_length=64)
     user2_public_key: str = Field(min_length=64, max_length=64)
     data1_format: DataFormat

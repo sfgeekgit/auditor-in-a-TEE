@@ -5,6 +5,13 @@
 # with the real ed25519 pubkeys of both signers (get them via `auditor keygen`).
 
 name: "Competitive Salary Benchmarking"
+summary: >-
+  Two companies compare compensation bands without revealing
+  individual salaries. Each company uploads their employee records
+  (role, department, annual_comp). The TEE validates the schemas
+  (VALID / INVALID), computes percentile bands per company and per
+  department with k-anonymity suppression, then a reviewer LLM emits
+  a COMPLIANT executive summary or a NON-COMPLIANT refusal.
 user1_public_key: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 user2_public_key: "cafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe"
 

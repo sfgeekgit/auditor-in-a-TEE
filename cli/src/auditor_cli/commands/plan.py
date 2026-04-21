@@ -114,6 +114,7 @@ def run_sign(args: argparse.Namespace) -> int:
     # the server stored, not our local YAML.
     server_view = {
         "name": plan["name"],
+        "summary": plan.get("summary"),
         "user1_public_key": plan["expected_keys"]["user1"],
         "user2_public_key": plan["expected_keys"]["user2"],
         "data1_format": plan["data1_format"],

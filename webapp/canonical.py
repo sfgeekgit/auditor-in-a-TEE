@@ -27,6 +27,7 @@ def canonical_plan_bytes(plan: dict) -> bytes:
     """
     payload = {
         "name": plan["name"],
+        "summary": plan.get("summary"),
         "user1_public_key": plan["user1_public_key"],
         "user2_public_key": plan["user2_public_key"],
         "data1_format": plan["data1_format"],

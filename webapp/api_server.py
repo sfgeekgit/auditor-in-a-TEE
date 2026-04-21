@@ -65,6 +65,7 @@ class Step(BaseModel):
 
 class CreatePlanRequest(BaseModel):
     name: str = Field(description="Human-readable plan name")
+    summary: Optional[str] = Field(default=None, description="One-paragraph description of what the plan does, shown in the UI")
     user1_public_key: str = Field(min_length=64, max_length=64, description="Expected ed25519 public key for user 1 (64 hex chars)")
     user2_public_key: str = Field(min_length=64, max_length=64, description="Expected ed25519 public key for user 2 (64 hex chars)")
     data1_format: DataFormat = Field(description="Expected format for user 1's data")
@@ -107,6 +108,7 @@ def create_plan(req: CreatePlanRequest):
     plan = {
         "id": plan_id,
         "name": req.name,
+        "summary": req.summary,
         "user1_public_key": req.user1_public_key,
         "user2_public_key": req.user2_public_key,
         "data1_format": req.data1_format.model_dump(),
@@ -181,6 +183,7 @@ def get_plan(plan_id: str):
     return {
         "id": plan["id"],
         "name": plan["name"],
+        "summary": plan.get("summary"),
         "data1_format": plan["data1_format"],
         "data2_format": plan["data2_format"],
         "steps": plan["steps"],
@@ -411,6 +414,27 @@ def run_stage(plan_id: str, req: RunStageRequest):
         "overall_status": plan["status"],
         "results": plan["stage_results"][stage],
     }
+
+
+@app.post("/plan/{plan_id}/reset")
+def reset_run(plan_id: str):
+    """
+    Clear the execution state of a plan without deleting it or losing the
+    submitted signatures / data. Intended for the demo webapp's "Re-run"
+    button: wipes results, stage_results, stage_status, and the internal
+    step_outputs cache so the plan can be executed again from scratch.
+    """
+    plan = plans.get(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    plan["results"] = None
+    plan["stage_results"] = {s: None for s in STAGES}
+    plan["stage_status"] = {s: "pending" for s in STAGES}
+    plan["step_outputs"] = {}
+    # Recompute status from signatures / data (back to data_ready if both
+    # submitted, else signed / created).
+    _update_plan_status(plan)
+    return {"status": plan["status"], "stage_status": plan["stage_status"]}
 
 
 @app.post("/plan/{plan_id}/run")
