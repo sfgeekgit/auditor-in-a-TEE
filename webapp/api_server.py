@@ -120,22 +120,36 @@ def create_plan(req: CreatePlanRequest):
         "tinfoil_api_key": req.tinfoil_api_key,
         "signatures": {},
         "data": {},
+        "previous_data": {},   # user_id -> prior submission, populated on appeals
         "results": None,
         "stage_status": {s: "pending" for s in STAGES},
         "stage_results": {s: None for s in STAGES},
         "step_outputs": {},
         "status": "created",
         "created_at": time.time(),
+        "ledger": [],  # append-only event log — populated by _append_ledger
     }
     plan["plan_hash"] = plan_hash_hex(plan)
 
     plans[plan_id] = plan
+    _append_ledger(plan, {"type": "plan_created", "name": req.name, "plan_id": plan_id})
 
     return {
         "plan_id": plan_id,
         "plan_hash": plan["plan_hash"],
         "status": "created",
     }
+
+
+def _append_ledger(plan: dict, entry: dict) -> None:
+    """
+    Append a single entry to the plan's public ledger.
+    Callers MUST NOT include any private data (query text, uploaded files, etc.)
+    — the ledger is visible to both parties.
+    """
+    entry = dict(entry)
+    entry.setdefault("timestamp", time.time())
+    plan.setdefault("ledger", []).append(entry)
 
 
 @app.post("/plans/reset")
@@ -191,6 +205,7 @@ def get_plan(plan_id: str):
         "plan_hash": plan["plan_hash"],
         "status": plan["status"],
         "stage_status": plan.get("stage_status", {s: "pending" for s in STAGES}),
+        "ledger": plan.get("ledger", []),
         "expected_keys": {
             "user1": plan["user1_public_key"],
             "user2": plan["user2_public_key"],
@@ -228,11 +243,14 @@ def sign_plan(plan_id: str, req: SignRequest):
         except (InvalidSignature, ValueError):
             raise HTTPException(status_code=403, detail="Invalid signature")
 
+    already_signed = req.user_id in plan["signatures"]
     plan["signatures"][req.user_id] = {
         "public_key": req.public_key,
         "signature": req.signature,
         "signed_at": time.time(),
     }
+    if not already_signed:
+        _append_ledger(plan, {"type": "signed", "user_id": req.user_id})
 
     _update_plan_status(plan)
 
@@ -272,7 +290,10 @@ def submit_data(plan_id: str, req: SubmitDataRequest):
         except (InvalidSignature, ValueError):
             raise HTTPException(status_code=403, detail="Invalid data signature")
 
+    first_upload = req.user_id not in plan["data"]
     plan["data"][req.user_id] = req.data
+    if first_upload:
+        _append_ledger(plan, {"type": "data_submitted", "user_id": req.user_id})
     _update_plan_status(plan)
 
     return {
@@ -354,7 +375,23 @@ def _run_stage(plan: dict, stage: str) -> list[dict]:
         tinfoil_api_key=plan.get("tinfoil_api_key"),
     )
     plan["stage_results"][stage] = results
-    plan["stage_status"][stage] = "failed" if _stage_has_invalid(results) else "passed"
+    failed = _stage_has_invalid(results)
+    plan["stage_status"][stage] = "failed" if failed else "passed"
+    # Log to the public ledger — ONLY the stage, which steps failed, and each
+    # failing step's title. No data, no prompt output, no raw content.
+    if failed:
+        failed_step_titles = [
+            (plan["steps"][r["step"]].get("title") or f"step {r['step']}")
+            for r in results
+            if r.get("status") != "success" or str(r.get("result") or "").strip().upper().startswith("INVALID")
+        ]
+        _append_ledger(plan, {
+            "type": "stage_failed",
+            "stage": stage,
+            "failed_steps": failed_step_titles,
+        })
+    else:
+        _append_ledger(plan, {"type": "stage_passed", "stage": stage})
     return results
 
 
@@ -487,6 +524,128 @@ def reset_plan_execution(plan_id: str):
     _update_plan_status(plan)  # back to data_ready / signed / created
 
     return {"status": plan["status"], "stage_status": plan["stage_status"]}
+
+
+@app.get("/plan/{plan_id}/ledger")
+def get_ledger(plan_id: str):
+    """
+    Return the public ledger for a plan. Visible to both parties. Entries are
+    append-only and never contain raw query text or uploaded data.
+    """
+    plan = plans.get(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return {"ledger": plan.get("ledger", [])}
+
+
+class AppealRequest(BaseModel):
+    user_id: str = Field(description="'user1' or 'user2' — the party filing the appeal")
+    public_key: str = Field(min_length=64, max_length=64)
+    new_data: str = Field(description="Replacement for this user's previously-submitted data")
+
+
+def _compare_queries_summary(old: str, new: str, api_key: Optional[str]) -> str:
+    """
+    One-line LLM comparison of two query submissions — the only content that
+    gets written to the public ledger on an accepted appeal. Returns a short
+    free-text summary (few words) or a fallback if no API key is available.
+    """
+    from dsl_executor import DEFAULT_MODEL, TINFOIL_API_KEY
+    from tinfoil import TinfoilAI
+    effective_key = TINFOIL_API_KEY or (api_key or "")
+    if not effective_key:
+        return "summary unavailable (no API key configured)"
+    prompt = (
+        "Compare these two versions of a query submission. In 5–12 words, "
+        "summarize how the NEW differs from the OLD — focus on semantic or "
+        "scope changes (e.g. \"narrowed to single category\", \"removed "
+        "per-user breakdown\", \"added label set\"). Output ONLY the "
+        "summary phrase, no prefix, no punctuation beyond what's in the "
+        "phrase.\n\nOLD:\n" + old + "\n\nNEW:\n" + new + "\n\nSummary:"
+    )
+    try:
+        client = TinfoilAI(api_key=effective_key)
+        resp = client.chat.completions.create(
+            model=DEFAULT_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=60,
+        )
+        msg = resp.choices[0].message
+        text = msg.content or getattr(msg, "reasoning_content", None) or ""
+        text = text.strip().splitlines()[0].strip() if text.strip() else "change summary unavailable"
+        # Hard cap the length so nothing resembling a full query leaks onto the ledger.
+        if len(text) > 120:
+            text = text[:117] + "…"
+        return text
+    except Exception:
+        return "change summary unavailable"
+
+
+@app.post("/plan/{plan_id}/appeal")
+def file_appeal(plan_id: str, req: AppealRequest):
+    """
+    Appeal a failed input-stage validation. The user whose query was rejected
+    submits a replacement. The new query re-runs the input stage. If it also
+    fails, the ledger records an appeal_rejected entry. If it passes, a
+    short LLM-generated diff summary is written to the ledger and the plan
+    proceeds.
+
+    The old query text is preserved server-side for the comparison step but
+    never written to the ledger; only the diff phrase is public.
+    """
+    plan = plans.get(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    if req.user_id not in ("user1", "user2"):
+        raise HTTPException(status_code=400, detail="user_id must be 'user1' or 'user2'")
+    if plan.get("stage_status", {}).get("input") != "failed":
+        raise HTTPException(status_code=409, detail="Appeal only allowed after input-stage failure")
+    expected_pk = plan["user1_public_key"] if req.user_id == "user1" else plan["user2_public_key"]
+    if req.public_key.lower() != expected_pk.lower():
+        raise HTTPException(status_code=403, detail=f"public_key does not match expected key for {req.user_id}")
+    if req.user_id not in plan["data"]:
+        raise HTTPException(status_code=400, detail=f"{req.user_id} has no prior submission to appeal")
+
+    old_data = plan["data"][req.user_id]
+    if req.new_data == old_data:
+        raise HTTPException(status_code=400, detail="new_data is identical to the prior submission")
+
+    # Preserve the old query for the comparison step, swap in the new one,
+    # and reset execution state so stages re-run against the new data.
+    plan["previous_data"][req.user_id] = old_data
+    plan["data"][req.user_id] = req.new_data
+    plan["results"] = None
+    plan["stage_results"] = {s: None for s in STAGES}
+    plan["stage_status"] = {s: "pending" for s in STAGES}
+    plan["step_outputs"] = {}
+    _update_plan_status(plan)
+    _append_ledger(plan, {"type": "appeal_filed", "user_id": req.user_id})
+
+    # Re-run the input stage only. Query / output are left for the normal
+    # Run button once the appeal has been accepted.
+    if _stage_indices(plan, "input"):
+        _run_stage(plan, "input")
+
+    if plan["stage_status"]["input"] == "failed":
+        _append_ledger(plan, {
+            "type": "appeal_rejected",
+            "user_id": req.user_id,
+            "reason": "new query still fails the policy check",
+        })
+        return {"status": "appeal_rejected", "stage_status": plan["stage_status"]}
+
+    # Input passed — run the comparison LLM for the public summary.
+    summary = _compare_queries_summary(old_data, req.new_data, plan.get("tinfoil_api_key"))
+    _append_ledger(plan, {
+        "type": "appeal_accepted",
+        "user_id": req.user_id,
+        "summary": summary,
+    })
+    return {
+        "status": "appeal_accepted",
+        "summary": summary,
+        "stage_status": plan["stage_status"],
+    }
 
 
 @app.get("/plan/{plan_id}/results")

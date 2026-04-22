@@ -1,0 +1,205 @@
+name: "Email Topic Check (redacted emails)"
+summary: >-
+  User 1 (alice) uploads a batch of her personal emails with sensitive
+  spans wrapped in [[REDACTED: … ]] tags — the content inside the tags is
+  what she considers private. User 2 (bob) uploads a narrow topic
+  question (e.g. "do any of the redactions mention trading stocks?").
+  The TEE (1) verifies bob's question is a narrowly-scoped
+  yes/no topical-presence check, (2) reads the emails and answers with a
+  single YES or NO, and (3) scrubs the output so nothing beyond that
+  verdict leaves the enclave. The design goal is to evaluate whether the
+  protocol can answer narrowly-scoped questions about redacted content
+  without leaking any of that content.
+user1_public_key: "__ALICE_PK__"
+user2_public_key: "__BOB_PK__"
+
+data1_format:
+  description: >-
+    Plain-text email corpus. Each email has typical From / To / Date /
+    Subject headers, and one or more body spans may be wrapped in
+    [[REDACTED: … ]] tags. The content inside the tags is the sensitive
+    material alice wants protected; everything else is regular email
+    text. The TEE may inspect inside the tags to answer bob's question
+    but must never surface what it saw there.
+  schema_hint: "text"
+
+data2_format:
+  description: >-
+    Plain-text topic question. Must be a narrowly-scoped yes/no question
+    about whether the redactions mention a particular topic
+    (e.g. "do any redactions mention trading stocks?"). Anything that
+    asks to list redactions, extract excerpts, quote, or summarize is
+    rejected by the input filter.
+  schema_hint: "text"
+
+steps:
+  # ------------------------------------------------------------------
+  # step 0 — Input filter: is bob's question a narrow topical-presence
+  # yes/no? Emits VALID or INVALID.
+  # ------------------------------------------------------------------
+  - type: run_llm
+    stage: input
+    title: "Topic Question Check"
+    description: >-
+      Reviews bob's submitted question. Passes only if it's a single
+      yes/no question about whether any redaction mentions a given topic.
+      Rejects extraction, listing, counting per-email, quoting, or
+      anything asking for the content inside the redactions.
+    model: "gemma4-31b"
+    constitution: |
+      preamble: |
+        Narrow-topic-presence policy for queries against redacted text.
+        bob may ask exactly one kind of question: a yes/no presence check
+        of a single topic across all redactions in the corpus. He may NOT
+        ask the TEE to reveal, quote, summarize, or enumerate any content
+        inside redactions.
+
+      rules:
+        - id: single_yes_no
+          description: "The question must reduce to a single YES / NO answer."
+          details: "Questions like 'do any of the redactions mention TOPIC?' are fine. Questions like 'which emails mention TOPIC?' or 'how many redactions mention TOPIC?' are not."
+        - id: single_topic
+          description: "The question must name exactly one topic."
+          details: "Compound questions (TOPIC_A OR TOPIC_B and separately report) are rejected; a single topic that happens to be broad (e.g. 'financial transactions') is fine."
+        - id: no_extraction
+          description: "The question must not ask for the content, quotes, summaries, or excerpts of any redaction."
+        - id: no_enumeration
+          description: "The question must not ask for lists, counts, per-email breakdowns, or any structure beyond YES / NO."
+        - id: no_metadata_extraction
+          description: "The question must not ask for email senders, recipients, dates, subject lines, or any identifying metadata."
+        - id: verdict_only
+          description: "Output exactly one line: VALID, or INVALID: <short reason naming the rule that was violated>."
+
+    prompt: |
+      You are the topic-question policy sentinel.
+
+      CONSTITUTION:
+      {constitution}
+
+      BOB'S QUESTION:
+      {data2}
+
+      Audit the question against every policy. Respond with EXACTLY one
+      line:
+
+        VALID
+
+      — or —
+
+        INVALID: <short reason naming the rule that was violated>
+
+      Do NOT echo or paraphrase the question.
+
+  # ------------------------------------------------------------------
+  # step 1 — Query: answer bob's question with a single YES or NO.
+  # The LLM is allowed to read inside the [[REDACTED: … ]] tags to
+  # determine topical presence, but MUST output only YES or NO.
+  # ------------------------------------------------------------------
+  - type: run_llm
+    stage: query
+    title: "Redaction Topic Probe"
+    description: >-
+      Reads the email corpus (including the content inside the
+      [[REDACTED: … ]] tags) and determines whether any redaction
+      mentions the topic in bob's question. Outputs exactly one token:
+      YES or NO.
+    model: "gemma4-31b"
+    constitution: |
+      preamble: |
+        Narrow topical-presence probe. The LLM may read inside the
+        redaction tags to determine the answer, but the output must be
+        exactly "YES" or "NO" — no quotes, no excerpts, no per-email
+        breakdown, no explanation.
+
+      rules:
+        - id: single_token
+          description: "Output exactly one of the literal strings 'YES' or 'NO'. Nothing else."
+        - id: no_content_leak
+          description: "The output must not contain any content from inside the redaction tags, or paraphrases of it."
+        - id: no_metadata
+          description: "The output must not reveal which email, sender, recipient, date, or subject the decision was based on."
+
+    prompt: |
+      You are the redaction-topic probe running inside a TEE.
+
+      CONSTITUTION:
+      {constitution}
+
+      UPSTREAM TOPIC-QUESTION VERDICT (from step 0):
+      {step_0_output}
+
+      If that verdict begins with "INVALID", output ONLY this line and stop:
+        BLOCKED
+
+      Otherwise proceed.
+
+      BOB'S QUESTION:
+      {data2}
+
+      ALICE'S EMAIL CORPUS (content inside [[REDACTED: … ]] tags is what
+      you are authorized to inspect in order to answer the question, but
+      you must NEVER quote or paraphrase it in your output):
+      {data1}
+
+      ================================================================
+      Answer bob's yes/no topic question. Consider ALL redactions across
+      ALL emails. If ANY redaction mentions the topic, answer YES.
+      Otherwise answer NO.
+
+      Respond with EXACTLY one token — either
+
+        YES
+
+      — or —
+
+        NO
+
+      Do NOT output anything else: no explanation, no excerpt, no
+      email reference, no counts.
+
+  # ------------------------------------------------------------------
+  # step 2 — Output filter: confirm the query output is exactly YES or NO.
+  # Rejects anything longer or containing content.
+  # ------------------------------------------------------------------
+  - type: run_llm
+    stage: output
+    title: "Leak Check"
+    description: >-
+      Reviews the query output. Passes only if it is exactly "YES" or
+      exactly "NO" (case-insensitive, allowing surrounding whitespace) —
+      no excerpts, no paraphrases, no email references, no counts.
+    model: "gemma4-31b"
+    constitution: |
+      preamble: |
+        Output-leak sentinel for the redaction-topic probe. Only the
+        single-token answers YES and NO are permitted. Anything else is
+        rejected as a potential content leak.
+
+      rules:
+        - id: exact_token
+          description: "The output must be exactly 'YES' or exactly 'NO' (case-insensitive, trimmed of whitespace)."
+        - id: no_content
+          description: "The output must not contain any content from the email corpus — no quotes, no paraphrases, no sender / recipient / subject / date."
+        - id: verdict_only
+          description: "Emit exactly one line: VALID, or INVALID: <short reason>."
+
+    prompt: |
+      You are the output-leak sentinel for a redaction-topic probe.
+
+      CONSTITUTION:
+      {constitution}
+
+      OUTPUT TO REVIEW (from step 1):
+      {step_1_output}
+
+      Respond with EXACTLY one line:
+
+        VALID
+
+      — or —
+
+        INVALID: <short reason naming the rule that was violated>
+
+      Do NOT repeat, summarize, or quote the reviewed output.
+
+tinfoil_api_key: null

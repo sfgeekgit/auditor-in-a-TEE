@@ -203,8 +203,45 @@ steps:
       6. On rule violation, output only: `BLOCKED: <short reason>`
 
   # ------------------------------------------------------------------
-  # step 2 — PII Policy Check (reusable).
-  # Audits the classifier output for privacy leaks.
+  # step 2 — PII Regex Scan (python).
+  # Deterministic regex pass over the classifier output. Flags emails,
+  # phone numbers, SSNs, credit-card digit runs, IPv4 addresses, and
+  # any markdown-table count cell of 1 or 2 (k-anonymity violation).
+  # Emits VALID or INVALID.
+  # ------------------------------------------------------------------
+  - type: run_python
+    stage: output
+    title: "PII Regex Scan"
+    description: >-
+      Deterministic regex pass over the classifier report. Flags emails,
+      phone numbers, SSNs, credit-card digit runs, IPv4 addresses, and
+      any markdown-table cell with a count of 1 or 2 (k-anonymity < 3).
+      Emits VALID or INVALID.
+    code: |
+      import re
+
+      text = step_1_output or ""
+
+      patterns = [
+          ("email",       r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}"),
+          ("phone",       r"\b(?:\+?\d{1,2}\s*)?(?:\(\d{3}\)|\d{3})[\s.\-]?\d{3}[\s.\-]?\d{4}\b"),
+          ("ssn",         r"\b\d{3}-\d{2}-\d{4}\b"),
+          ("credit_card", r"\b(?:\d{4}[\s\-]?){3}\d{4}\b"),
+          ("ipv4",        r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
+          ("small_count", r"\|\s*[12]\s*\|"),
+      ]
+
+      hits = [name for name, pat in patterns if re.search(pat, text)]
+
+      if hits:
+          result = f"INVALID: PII regex matched: {', '.join(hits)}"
+      else:
+          result = "VALID"
+
+  # ------------------------------------------------------------------
+  # step 3 — PII Policy Check (reusable).
+  # Semantic LLM pass — catches context-sensitive leaks the regex
+  # can't (paraphrased names, topical content lifted from messages, etc.).
   # ------------------------------------------------------------------
   - type: run_llm
     stage: output

@@ -1,0 +1,148 @@
+name: "Loan Underwriting (redacted statements)"
+summary: >-
+  A small business applies for a loan. User 1 (their accountant, alice)
+  holds the business's bank statements — containing vendor names,
+  customer identities, and per-employee payroll. The underwriting rule
+  is fixed and agreed by both parties through the plan itself: APPROVE
+  iff no single counterparty accounted for more than 40% of monthly
+  revenue. The accountant uploads redacted statements; user 2 (the
+  lender, bob) is a co-signer only — he uploads nothing. The TEE runs
+  two steps: an LLM extracts anonymized per-month counterparty inflows
+  into structured JSON, then a python node computes the max
+  single-counterparty share across months and emits VALID (approve) or
+  INVALID (decline). Nothing beyond that verdict leaves the enclave.
+user1_public_key: "__ALICE_PK__"
+user2_public_key: "__BOB_PK__"
+
+data1_format:
+  description: >-
+    Plain-text bank statements covering several months. Sensitive
+    identifiers are masked as [[REDACTED:customer_A]],
+    [[REDACTED:vendor_X]], [[REDACTED:employee_1]] etc. — the kind and a
+    stable anonymous ID are preserved so counterparties can be
+    aggregated, but no names, account numbers, or memo text appear.
+    Each line has the form:
+    "MM/DD  Deposit|Payment|Payroll  [[REDACTED:kind_id]]  $amount".
+  schema_hint: "text"
+
+data2_format:
+  description: >-
+    Unused by this plan — the underwriting rule (40% max-counterparty
+    threshold) is agreed via the plan itself, not uploaded. Bob is a
+    co-signer and uploads any placeholder value (e.g. "co-signed").
+  schema_hint: "text"
+
+steps:
+  # ------------------------------------------------------------------
+  # step 0 — Query (LLM extraction): read the redacted bank statements
+  # and emit a structured JSON object of per-month counterparty inflows.
+  # Output is held inside the TEE and not surfaced to the operator.
+  # ------------------------------------------------------------------
+  - type: run_llm
+    stage: query
+    title: "Extract Data"
+    description: >-
+      Parses the redacted bank statements, groups Deposit-line inflows
+      by anonymous counterparty ID per month, and emits a JSON object:
+      {"months": {"Jan 2025": {"customer_A": 12500, ...}, ...}}. No
+      names, no outflows, no payroll detail appear.
+    model: "gemma4-31b"
+    constitution: |
+      preamble: |
+        The TEE extracts aggregate inflow totals per anonymized
+        counterparty per month from the redacted statements. Only the
+        stable IDs inside [[REDACTED:kind_id]] tags are used as keys —
+        never names, never the raw tag text. The downstream python node
+        does the arithmetic and emits the verdict.
+
+      rules:
+        - id: inflows_only
+          description: "Include only Deposit lines. Payments and Payroll are outflows and must be excluded."
+        - id: anonymous_ids_as_keys
+          description: "Use the anonymized ID inside each [[REDACTED:kind_id]] tag as the JSON key (e.g. customer_A, customer_B)."
+        - id: strip_redacted_tags
+          description: "The output must NOT contain any [[REDACTED:…]] tags — just the id extracted from the tag."
+        - id: no_names
+          description: "Never surface any real name, only the anonymous IDs."
+        - id: strict_json
+          description: "Emit exactly one JSON object and nothing else. No Markdown fences, no commentary, no prose."
+
+    prompt: |
+      You are a JSON-extraction node inside a TEE.
+
+      CONSTITUTION:
+      {constitution}
+
+      REDACTED BANK STATEMENTS:
+      {data1}
+
+      Extract per-month inflow totals grouped by the anonymous
+      counterparty ID inside each [[REDACTED:kind_id]] tag. Count only
+      Deposit lines (ignore Payment and Payroll lines — those are
+      outflows).
+
+      Output EXACTLY one JSON object, nothing else. Schema:
+
+      {
+        "months": {
+          "<Mon YYYY>": {
+            "<counterparty_id>": <number total inflow for the month>,
+            ...
+          },
+          ...
+        }
+      }
+
+      Do NOT include explanations, Markdown fences, or commentary.
+      Do NOT include the [[REDACTED:…]] tag text — only the id inside.
+
+  # ------------------------------------------------------------------
+  # step 1 — Output (python verdict): compute the max single-counterparty
+  # share per month from step 0's JSON, take the overall maximum, and
+  # emit a final VALID / INVALID verdict against the 40% threshold.
+  # ------------------------------------------------------------------
+  - type: run_python
+    stage: output
+    title: "Concentration Verdict"
+    description: >-
+      Parses step 0's extracted JSON, computes
+      max_share = max counterparty inflow / total inflow per month,
+      takes the overall maximum, and emits "VALID: …" (approve) if the
+      overall max < 40%, or "INVALID: …" (decline) otherwise. The
+      verdict line is the only thing surfaced.
+    code: |
+      import json
+      import re
+
+      raw = (step_0_output or "").strip()
+      # Tolerate markdown fences if the extractor slipped any in.
+      raw = re.sub(r"^```(?:json)?\s*", "", raw)
+      raw = re.sub(r"\s*```$", "", raw)
+
+      try:
+          data = json.loads(raw)
+      except Exception:
+          result = "INVALID: could not parse extracted counterparty JSON"
+      else:
+          months = data.get("months", {})
+          if not isinstance(months, dict) or not months:
+              result = "INVALID: no months found in extracted data"
+          else:
+              overall_max = 0.0
+              for parties in months.values():
+                  if not isinstance(parties, dict):
+                      continue
+                  total = sum(v for v in parties.values() if isinstance(v, (int, float)))
+                  if total <= 0:
+                      continue
+                  top = max(parties.values())
+                  share = top / total
+                  if share > overall_max:
+                      overall_max = share
+              pct = overall_max * 100
+              if overall_max < 0.40:
+                  result = f"VALID: max single-counterparty share was {pct:.1f}% (below 40% threshold — APPROVE)"
+              else:
+                  result = f"INVALID: max single-counterparty share was {pct:.1f}% (meets or exceeds 40% threshold — DECLINE)"
+
+tinfoil_api_key: null
