@@ -32,4 +32,4 @@ auditor plan sign --user user1 --key "$ALICE_KEY"
 log "Submitting placeholder as user1 data"
 auditor data submit --user user1 --key "$ALICE_KEY" --data "$DATA_FILE"
 
-log "Done. Plan still needs bob (user2) to sign + submit the failing query."
+log "Done. Plan still needs openbrain (user2) to sign + submit the failing query."
