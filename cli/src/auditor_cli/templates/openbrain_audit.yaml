@@ -32,6 +32,13 @@ data1_format:
     context from earlier in the same chat, may be empty> }. Each entry is one
     user-authored message sent to ChatGPT.
   schema_hint: "json"
+  example:
+    user: "anon-1234"
+    messages:
+      - text: "what time does the post office close?"
+        prior: ""
+      - text: "draft an email to my manager about pto next week"
+        prior: ""
 
 data2_format:
   description: >-
@@ -39,6 +46,9 @@ data2_format:
     ["work_nonwork", "asking_doing_expressing", "conversation_topic"] chosen
     from Appendix A of the paper. The TEE refuses anything not on this list.
   schema_hint: "json"
+  example:
+    researcher: "openbrain-research"
+    classifiers: ["work_nonwork", "asking_doing_expressing"]
 
 steps:
   # ------------------------------------------------------------------

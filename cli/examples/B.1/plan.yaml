@@ -25,6 +25,18 @@ data2_format:
     same shape as A.1 / A.2's data2 — with "researcher", "purpose",
     "classifier_name", "label_set", and "classifier_prompt".
   schema_hint: "json"
+  example:
+    queries:
+      - researcher: "openbrain-research"
+        purpose: "Aggregate work / non-work usage"
+        classifier_name: "work_nonwork"
+        label_set: ["WORK", "NON_WORK"]
+        classifier_prompt: "Classify as WORK or NON_WORK. Output only the label."
+      - researcher: "openbrain-research"
+        purpose: "Asking / Doing / Expressing distribution"
+        classifier_name: "asking_doing_expressing"
+        label_set: ["ASKING", "DOING", "EXPRESSING"]
+        classifier_prompt: "Classify as ASKING, DOING, or EXPRESSING. Output only the label."
 
 steps:
   # ------------------------------------------------------------------

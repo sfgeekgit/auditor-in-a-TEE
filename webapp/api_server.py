@@ -8,7 +8,7 @@ submit their data to the TEE, and receive results.
 import os
 import uuid
 import time
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 import uvicorn
 from cryptography.exceptions import InvalidSignature
@@ -47,6 +47,7 @@ app.add_middleware(
 class DataFormat(BaseModel):
     description: str = Field(description="Human-readable description of what data is expected")
     schema_hint: str = Field(default="text", description="Expected format: text, json, csv")
+    example: Optional[Any] = Field(default=None, description="Optional concrete example of the data shape — pretty-printed in the UI when present")
 
 
 class Step(BaseModel):

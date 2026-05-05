@@ -21,6 +21,7 @@ Stage = Literal["input", "query", "output"]
 class DataFormat(BaseModel):
     description: str
     schema_hint: str = "text"
+    example: Optional[Any] = None
 
 
 class Step(BaseModel):

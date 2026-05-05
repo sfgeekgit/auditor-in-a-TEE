@@ -15,17 +15,27 @@ data1_format:
     JSON object with "user" (opaque participant id) and "messages" — an
     array of { "text": <user message>, "prior": <optional prior context> }.
   schema_hint: "json"
+  example:
+    user: "anon-1234"
+    messages:
+      - text: "what time does the post office close?"
+        prior: ""
+      - text: "draft an email to my manager about pto next week"
+        prior: ""
 
 data2_format:
   description: >-
-    JSON object with "researcher", "purpose", "classifier_name" (short
-    label), "label_set" (the enumerated categorical outputs the classifier
-    is allowed to produce), and "classifier_prompt" (the verbatim prompt
-    the TEE applies to each user message). The classifier_prompt is
-    private to user2 — user1 agrees to the plan's monitoring policy
-    without seeing the specific prompt text; the TEE is what enforces
-    compliance.
+    JSON object with "researcher", "purpose", "classifier_name", "label_set",
+    and "classifier_prompt" (the verbatim prompt the TEE applies to each user
+    message). The classifier_prompt is private to user2 — user1 agrees to the
+    plan's monitoring policy without seeing the specific prompt text.
   schema_hint: "json"
+  example:
+    researcher: "openbrain-research"
+    purpose: "Conversation topic distribution"
+    classifier_name: "conversation_topic"
+    label_set: ["WORK", "PERSONAL", "EDUCATION", "ENTERTAINMENT", "OTHER"]
+    classifier_prompt: "Classify the message into one of the topic labels above. Output only the label."
 
 steps:
   # ------------------------------------------------------------------

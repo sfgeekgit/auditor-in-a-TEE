@@ -23,12 +23,36 @@ data1_format:
     JSON object with "company" name and "employees" array. Each employee has
     "role", "department", and "annual_comp" (total compensation in USD).
   schema_hint: "json"
+  example:
+    company: "Acme Robotics"
+    employees:
+      - role: "Software Engineer"
+        department: "Platform"
+        annual_comp: 185000
+      - role: "Senior Software Engineer"
+        department: "Platform"
+        annual_comp: 235000
+      - role: "Product Manager"
+        department: "Product"
+        annual_comp: 210000
 
 data2_format:
   description: >-
     JSON object with "company" name and "employees" array. Each employee has
     "role", "department", and "annual_comp" (total compensation in USD).
   schema_hint: "json"
+  example:
+    company: "Globex"
+    employees:
+      - role: "Software Engineer"
+        department: "Engineering"
+        annual_comp: 178000
+      - role: "Senior Software Engineer"
+        department: "Engineering"
+        annual_comp: 245000
+      - role: "Product Manager"
+        department: "Product"
+        annual_comp: 220000
 
 steps:
   # ------------------------------------------------------------------
