@@ -65,7 +65,8 @@ class Step(BaseModel):
 
 class CreatePlanRequest(BaseModel):
     name: str = Field(description="Human-readable plan name")
-    summary: Optional[str] = Field(default=None, description="One-paragraph description of what the plan does, shown in the UI")
+    tldr: Optional[str] = Field(default=None, description="One short sentence (≤ 15 words) — shown in the plan dropdown and as the headline of the plan view")
+    summary: Optional[str] = Field(default=None, description="Longer paragraph description — shown in the plan view below the TL;DR")
     user1_public_key: str = Field(min_length=64, max_length=64, description="Expected ed25519 public key for user 1 (64 hex chars)")
     user2_public_key: str = Field(min_length=64, max_length=64, description="Expected ed25519 public key for user 2 (64 hex chars)")
     data1_format: DataFormat = Field(description="Expected format for user 1's data")
@@ -108,6 +109,7 @@ def create_plan(req: CreatePlanRequest):
     plan = {
         "id": plan_id,
         "name": req.name,
+        "tldr": req.tldr,
         "summary": req.summary,
         "user1_public_key": req.user1_public_key,
         "user2_public_key": req.user2_public_key,
@@ -172,6 +174,8 @@ def list_plans():
             {
                 "id": p["id"],
                 "name": p["name"],
+                "tldr": p.get("tldr"),
+                "summary": p.get("summary"),
                 "status": p["status"],
                 "created_at": p["created_at"],
                 "has_results": p["results"] is not None,
@@ -197,6 +201,7 @@ def get_plan(plan_id: str):
     return {
         "id": plan["id"],
         "name": plan["name"],
+        "tldr": plan.get("tldr"),
         "summary": plan.get("summary"),
         "data1_format": plan["data1_format"],
         "data2_format": plan["data2_format"],
@@ -456,14 +461,32 @@ def run_stage(plan_id: str, req: RunStageRequest):
 @app.post("/plan/{plan_id}/reset")
 def reset_run(plan_id: str):
     """
-    Clear the execution state of a plan without deleting it or losing the
-    submitted signatures / data. Intended for the demo webapp's "Re-run"
-    button: wipes results, stage_results, stage_status, and the internal
-    step_outputs cache so the plan can be executed again from scratch.
+    Reset a plan to the state it was in immediately after both parties
+    uploaded their data — without losing the plan, signatures, or original
+    submissions. Used by the demo webapp's "Reset Execution" button so the
+    full flow (including the appeals scenario) can be re-tested without
+    recreating the plan.
+
+    Wipes execution state, restores any pre-appeal submissions from
+    `previous_data`, and prunes ledger entries from prior execution cycles
+    (stage pass/fail, appeals) so the next run starts with a clean log.
+    Setup entries (plan_created, signed, data_submitted) are kept.
     """
     plan = plans.get(plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
+
+    # Restore any data that was swapped out during an appeal so the failing
+    # scenario is reachable again. previous_data is populated only by
+    # /plan/{id}/appeal and only when the existing data is overwritten.
+    for user_id, original in plan.get("previous_data", {}).items():
+        plan["data"][user_id] = original
+    plan["previous_data"] = {}
+
+    # Drop execution-cycle ledger entries; keep setup history.
+    keep_types = {"plan_created", "signed", "data_submitted"}
+    plan["ledger"] = [e for e in plan.get("ledger", []) if e.get("type") in keep_types]
+
     plan["results"] = None
     plan["stage_results"] = {s: None for s in STAGES}
     plan["stage_status"] = {s: "pending" for s in STAGES}
@@ -503,27 +526,6 @@ def run_plan(plan_id: str):
     plan["results"] = _flatten_results(plan)
     plan["status"] = "completed"
     return {"status": "completed", "results": plan["results"]}
-
-
-@app.post("/plan/{plan_id}/reset")
-def reset_plan_execution(plan_id: str):
-    """
-    Clear execution state for a single plan so it can be re-run from scratch.
-    Signatures, data, and the plan itself are preserved — only stage results,
-    stage status, step outputs, and the flattened results are wiped.
-    Intended for demo / debugging loops.
-    """
-    plan = plans.get(plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan not found")
-
-    plan["results"] = None
-    plan["stage_results"] = {s: None for s in STAGES}
-    plan["stage_status"] = {s: "pending" for s in STAGES}
-    plan["step_outputs"] = {}
-    _update_plan_status(plan)  # back to data_ready / signed / created
-
-    return {"status": plan["status"], "stage_status": plan["stage_status"]}
 
 
 @app.get("/plan/{plan_id}/ledger")

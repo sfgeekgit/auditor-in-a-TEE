@@ -1,4 +1,7 @@
 name: "Monitor Query Validation"
+tldr: >-
+  Filter-only audit — the researcher's classifier prompts are checked
+  against the monitoring policy.
 summary: >-
   Filter-only plan. User 2 (the researcher) submits a JSON object containing
   two classifier specs — the A.1 "Work / Non-Work" prompt and the A.2

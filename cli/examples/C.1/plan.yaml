@@ -1,4 +1,7 @@
 name: "C.1"
+tldr: >-
+  Third variant of the chat-message classification flow, with PII-policy
+  gating on release.
 summary: >-
   Third variant of the chat-message classification flow. Same three-stage
   shape as LLM Usage Analysis: a monitoring-policy audit on the submitted

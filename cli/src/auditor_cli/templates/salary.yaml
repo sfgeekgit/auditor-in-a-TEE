@@ -5,6 +5,9 @@
 # with the real ed25519 pubkeys of both signers (get them via `auditor keygen`).
 
 name: "Competitive Salary Benchmarking"
+tldr: >-
+  Two companies compare compensation bands by role and department
+  without revealing individual salaries.
 summary: >-
   Two companies compare compensation bands without revealing
   individual salaries. Each company uploads their employee records

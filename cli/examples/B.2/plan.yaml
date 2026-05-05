@@ -1,13 +1,16 @@
 name: "Monitor Query Validation (failing demo)"
+tldr: >-
+  Appeals demo — a deliberately non-compliant query is rejected, then
+  user 2 appeals with a revised version.
 summary: >-
   Demonstrates the appeals flow. The plan is identical in shape to B.1
   (Monitor Query Validation) but user 2 (openbrain) submits a query that
   deliberately violates several monitoring-policy rules: per-user
   profiling, content extraction, competitive intelligence. The
   monitoring-policy node emits INVALID, which writes a failure row to
-  the public ledger and lets openbrain file an appeal from their logged-in view.
-  If the appeal's revised query passes, an LLM-generated diff summary is
-  posted to the ledger and the plan proceeds.
+  the public ledger and lets openbrain file an appeal from their
+  logged-in view. If the appeal's revised query passes, an LLM-generated
+  diff summary is posted to the ledger and the plan proceeds.
 user1_public_key: "__ALICE_PK__"
 user2_public_key: "__OPENBRAIN_PK__"
 

@@ -1,4 +1,7 @@
 name: "LLM Classifier Audit"
+tldr: >-
+  Stricter variant of A.1 — same classifier flow with tighter
+  label-set enforcement on the researcher's prompt.
 summary: >-
   Variant of the LLM Usage Analysis flow with stricter label-set
   constraints. User 1 uploads their chat messages; User 2 uploads a

@@ -1,4 +1,7 @@
 name: "Email Topic Check (redacted emails)"
+tldr: >-
+  Yes/no topical-presence questions over redacted emails — the verdict
+  leaves the enclave but the redacted content does not.
 summary: >-
   User 1 (alice) uploads a batch of her personal emails with sensitive
   spans wrapped in [[REDACTED: … ]] tags — the content inside the tags is

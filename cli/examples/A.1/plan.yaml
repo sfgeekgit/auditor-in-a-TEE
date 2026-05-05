@@ -1,4 +1,7 @@
 name: "LLM Usage Analysis"
+tldr: >-
+  A researcher classifies user 1's chat messages with their own prompt
+  and gets back only aggregate label counts.
 summary: >-
   Two parties collaborate on an aggregate-only study of chat-message
   usage. User 1 uploads their ChatGPT-style messages. User 2 (the

@@ -11,6 +11,9 @@
 # below with the real ed25519 pubkeys of both signers.
 
 name: "OpenBrain ChatGPT Usage Audit"
+tldr: >-
+  A researcher runs whitelisted paper classifiers over user 1's
+  ChatGPT messages and gets back only aggregate label counts.
 summary: >-
   Privacy-preserving replication of the Appendix A classifiers from
   "How People Use ChatGPT" (Chatterji et al., 2025). User 1 shares a

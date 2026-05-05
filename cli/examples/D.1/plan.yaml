@@ -1,4 +1,7 @@
 name: "Loan Underwriting (redacted statements)"
+tldr: >-
+  A lender approves a loan iff no single counterparty exceeds 40% of
+  monthly revenue, computed from redacted bank statements.
 summary: >-
   A small business applies for a loan. User 1 (their accountant, alice)
   holds the business's bank statements — containing vendor names,
