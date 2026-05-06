@@ -1,7 +1,8 @@
 #!/bin/bash
 #
-# User 1 (Alice) on plan B.2: sign the plan and upload a placeholder.
-# Alice is a co-signer only; the plan doesn't use her data.
+# User 1 (Alice) on plan B.2 (failing demo): co-sign the plan.
+# Alice's data isn't read by any step in this plan, so she has no data to
+# upload — the TEE no longer requires a placeholder for unused slots.
 
 set -euo pipefail
 
@@ -20,16 +21,7 @@ if [[ ! -f "$ALICE_KEY" ]]; then
   exit 1
 fi
 
-DATA_FILE="$(mktemp -t alice-b2-placeholder-XXXXXX.txt)"
-trap 'rm -f "$DATA_FILE"' EXIT
-
-log "Writing placeholder data1 (unused by this plan)"
-printf 'unused' > "$DATA_FILE"
-
-log "Signing plan as user1 (Alice)"
+log "Signing plan as user1 (Alice — co-signer only, no data required)"
 auditor plan sign --user user1 --key "$ALICE_KEY"
-
-log "Submitting placeholder as user1 data"
-auditor data submit --user user1 --key "$ALICE_KEY" --data "$DATA_FILE"
 
 log "Done. Plan still needs openbrain (user2) to sign + submit the failing query."

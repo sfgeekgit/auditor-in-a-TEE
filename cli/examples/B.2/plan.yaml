@@ -16,8 +16,8 @@ user2_public_key: "__OPENBRAIN_PK__"
 
 data1_format:
   description: >-
-    Unused by this plan — user 1 is a co-signer only. Upload any
-    placeholder value (e.g. the string "unused").
+    Not required for this plan — user 1 is a co-signer only and no step
+    reads this slot's data.
   schema_hint: "text"
 
 data2_format:

@@ -1,10 +1,9 @@
 #!/bin/bash
 #
-# User 2 (Bob, the lender) on plan D.1: sign the plan and upload a
-# placeholder as data2. The underwriting rule (40% max-counterparty
-# threshold) is agreed via the plan itself, not uploaded — so Bob is a
-# co-signer only. The TEE still requires both parties to submit
-# something before running, so we upload the literal string "co-signed".
+# User 2 (Bob, the lender) on plan D.1: co-sign the plan. The underwriting
+# rule (40% max-counterparty threshold) is agreed via the plan itself, not
+# uploaded — so Bob is a co-signer only. The TEE no longer requires a
+# placeholder upload for unused slots.
 
 set -euo pipefail
 
@@ -23,16 +22,7 @@ if [[ ! -f "$BOB_KEY" ]]; then
   exit 1
 fi
 
-DATA_FILE="$(mktemp -t bob-d1-placeholder-XXXXXX.txt)"
-trap 'rm -f "$DATA_FILE"' EXIT
-
-log "Writing placeholder data2 (Bob is a co-signer only)"
-printf 'co-signed' > "$DATA_FILE"
-
-log "Signing plan as user2 (Bob, the lender)"
+log "Signing plan as user2 (Bob, the lender — co-signer only, no data required)"
 auditor plan sign --user user2 --key "$BOB_KEY"
-
-log "Submitting placeholder as user2 data"
-auditor data submit --user user2 --key "$BOB_KEY" --data "$DATA_FILE"
 
 log "Done. Plan should now be data_ready — run ./execute.sh."

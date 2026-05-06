@@ -6,6 +6,7 @@ submit their data to the TEE, and receive results.
 """
 
 import os
+import re
 import uuid
 import time
 from typing import Any, Literal, Optional
@@ -221,6 +222,12 @@ def get_plan(plan_id: str):
             "user1": "user1" in plan["data"],
             "user2": "user2" in plan["data"],
         },
+        "data_required": {
+            # True iff some step in the plan actually reads this slot's data.
+            # Co-signers whose data is unused don't need to upload anything.
+            "user1": "user1" in _data_required_slots(plan),
+            "user2": "user2" in _data_required_slots(plan),
+        },
         "has_results": plan["results"] is not None,
     }
 
@@ -334,11 +341,37 @@ def get_submitted_data(plan_id: str, user_id: str):
     }
 
 
+_DATA_NAME_RE = {
+    "user1": re.compile(r"\bdata1\b"),
+    "user2": re.compile(r"\bdata2\b"),
+}
+_DATA_PLACEHOLDER = {"user1": "{data1}", "user2": "{data2}"}
+
+
+def _data_required_slots(plan) -> set[str]:
+    """Return slots whose data is actually referenced by some step.
+
+    Co-signers whose data isn't read anywhere in the pipeline don't have to
+    upload — requiring them to upload a placeholder ("unused") was misleading
+    UX and pretended the data was meaningful when it wasn't.
+    """
+    needed: set[str] = set()
+    for step in plan.get("steps", []):
+        needed |= _step_data_refs(step)
+    return needed
+
+
 def _update_plan_status(plan):
-    """Recompute plan status based on current signatures and data."""
+    """Recompute plan status based on current signatures and data.
+
+    A plan is `data_ready` once both parties sign AND every slot whose data
+    a step actually reads has uploaded. Slots whose data is unused don't
+    need to upload anything — they're co-signers only.
+    """
     both_signed = "user1" in plan["signatures"] and "user2" in plan["signatures"]
-    both_data = "user1" in plan["data"] and "user2" in plan["data"]
-    if both_signed and both_data:
+    needed = _data_required_slots(plan)
+    required_data_in = all(slot in plan["data"] for slot in needed)
+    if both_signed and required_data_in:
         plan["status"] = "data_ready"
     elif both_signed:
         plan["status"] = "signed"
@@ -352,6 +385,49 @@ class RunStageRequest(BaseModel):
 
 def _stage_indices(plan: dict, stage: str) -> list[int]:
     return [i for i, s in enumerate(plan["steps"]) if s.get("stage") == stage]
+
+
+def _step_data_refs(step: dict) -> set[str]:
+    """Which slots' data does a step actually read? Mirrors the webapp's
+    _stepInputs() — checks LLM prompt/constitution placeholders and bare
+    Python identifiers in run_python code."""
+    refs: set[str] = set()
+    text = (step.get("prompt") or "") + "\n" + (step.get("constitution") or "")
+    code = step.get("code") or step.get("script") or ""
+    for slot in ("user1", "user2"):
+        if _DATA_PLACEHOLDER[slot] in text or _DATA_NAME_RE[slot].search(code):
+            refs.add(slot)
+    return refs
+
+
+def _failed_input_step_responsible_slot(plan: dict) -> Optional[str]:
+    """Return the slot whose data the first failed input step consumed.
+
+    Returns None when the failing step reads both slots (ambiguous — either
+    party could appeal) or neither (no clear owner). Used to enforce that
+    only the responsible party may file /appeal.
+    """
+    results = (plan.get("stage_results") or {}).get("input") or []
+    failed = next(
+        (
+            r for r in results
+            if r.get("status") != "success"
+            or str(r.get("result") or "").strip().upper().startswith("INVALID")
+        ),
+        None,
+    )
+    if not failed:
+        return None
+    idx = failed.get("step")
+    step = (plan.get("steps") or [None] * (idx + 1))[idx] if isinstance(idx, int) else None
+    if not step:
+        return None
+    refs = _step_data_refs(step)
+    if refs == {"user1"}:
+        return "user1"
+    if refs == {"user2"}:
+        return "user2"
+    return None
 
 
 def _stage_has_invalid(results: list[dict]) -> bool:
@@ -608,6 +684,19 @@ def file_appeal(plan_id: str, req: AppealRequest):
         raise HTTPException(status_code=403, detail=f"public_key does not match expected key for {req.user_id}")
     if req.user_id not in plan["data"]:
         raise HTTPException(status_code=400, detail=f"{req.user_id} has no prior submission to appeal")
+    # Only the party whose data the failing input step actually consumed may
+    # appeal. The other co-signer (or the unrelated party in a multi-input
+    # plan) didn't cause the rejection and shouldn't be able to overwrite
+    # someone else's submission. Mirrors the UI gate in updateAppealCard.
+    responsible = _failed_input_step_responsible_slot(plan)
+    if responsible is not None and responsible != req.user_id:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Appeal not allowed: the failing input step reads {responsible}'s "
+                f"data, not {req.user_id}'s. Only {responsible} can appeal."
+            ),
+        )
 
     old_data = plan["data"][req.user_id]
     if req.new_data == old_data:

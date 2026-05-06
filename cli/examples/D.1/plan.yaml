@@ -30,9 +30,9 @@ data1_format:
 
 data2_format:
   description: >-
-    Unused by this plan — the underwriting rule (40% max-counterparty
-    threshold) is agreed via the plan itself, not uploaded. Bob is a
-    co-signer and uploads any placeholder value (e.g. "co-signed").
+    Not required for this plan — the underwriting rule (40%
+    max-counterparty threshold) is agreed via the plan itself, not
+    uploaded. Bob is a co-signer only.
   schema_hint: "text"
 
 steps:
