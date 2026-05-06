@@ -50,7 +50,7 @@ steps:
       anything asking for the content inside the redactions.
     model: "gemma4-31b"
     constitution: |
-      preamble: |
+      summary: |
         Narrow-topic-presence policy for queries against redacted text.
         bob may ask exactly one kind of question: a yes/no presence check
         of a single topic across all redactions in the corpus. He may NOT
@@ -71,7 +71,7 @@ steps:
         - id: no_metadata_extraction
           description: "The question must not ask for email senders, recipients, dates, subject lines, or any identifying metadata."
         - id: verdict_only
-          description: "Output exactly one line: VALID, or INVALID: <short reason naming the rule that was violated>."
+          description: "Output exactly one word: VALID or INVALID."
 
     prompt: |
       You are the topic-question policy sentinel.
@@ -89,7 +89,7 @@ steps:
 
       — or —
 
-        INVALID: <short reason naming the rule that was violated>
+        INVALID
 
       Do NOT echo or paraphrase the question.
 
@@ -108,7 +108,7 @@ steps:
       YES or NO.
     model: "gemma4-31b"
     constitution: |
-      preamble: |
+      summary: |
         Narrow topical-presence probe. The LLM may read inside the
         redaction tags to determine the answer, but the output must be
         exactly "YES" or "NO" — no quotes, no excerpts, no per-email
@@ -173,7 +173,7 @@ steps:
       no excerpts, no paraphrases, no email references, no counts.
     model: "gemma4-31b"
     constitution: |
-      preamble: |
+      summary: |
         Output-leak sentinel for the redaction-topic probe. Only the
         single-token answers YES and NO are permitted. Anything else is
         rejected as a potential content leak.
@@ -184,7 +184,7 @@ steps:
         - id: no_content
           description: "The output must not contain any content from the email corpus — no quotes, no paraphrases, no sender / recipient / subject / date."
         - id: verdict_only
-          description: "Emit exactly one line: VALID, or INVALID: <short reason>."
+          description: "Output exactly one word: VALID or INVALID."
 
     prompt: |
       You are the output-leak sentinel for a redaction-topic probe.
@@ -201,7 +201,7 @@ steps:
 
       — or —
 
-        INVALID: <short reason naming the rule that was violated>
+        INVALID
 
       Do NOT repeat, summarize, or quote the reviewed output.
 

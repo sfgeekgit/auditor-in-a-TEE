@@ -52,7 +52,7 @@ steps:
       monitoring policy. Emits VALID or INVALID. Gates whether any query runs.
     model: "gemma4-31b"
     constitution: |
-      preamble: |
+      summary: |
         Monitoring Policy for researcher queries run against a user's
         private chatbot messages inside a TEE. The purpose of this
         system is to enable HIGH-LEVEL, AGGREGATE STATISTICAL analysis
@@ -92,8 +92,8 @@ steps:
           description: "The stated purpose must be consistent with published economic/usage research."
           details: "A 'researcher' field identifying an academic or published-research context is expected. Purposes like 'product targeting', 'sales intelligence', 'safety intervention', 'moderation', or 'growth analysis' are rejected — those may be legitimate elsewhere but are not what this system authorizes."
         - id: verdict_only
-          description: "The monitoring policy node must output only the verdict line."
-          details: "On VALID: the single word VALID. On INVALID: 'INVALID: <one-line reason naming the rule that was violated>'. No commentary, no echo of the reviewed prompt, no list of problems — just the single verdict line."
+          description: "Output exactly one word: VALID or INVALID."
+          details: "Output nothing else — no reason, no commentary, no echo of the reviewed prompt."
 
     prompt: |
       You are the Monitoring Policy sentinel for a privacy-preserving
@@ -118,7 +118,7 @@ steps:
 
       — or —
 
-        INVALID: <short specific reason naming the rule that was violated>
+        INVALID
 
       Do NOT quote, echo, or summarize the reviewed spec.
 
@@ -137,7 +137,7 @@ steps:
       operator until the PII policy check passes.
     model: "gemma4-31b"
     constitution: |
-      preamble: |
+      summary: |
         Query executor. Applies the researcher's pre-approved classifier
         prompt to each of the user's private messages and returns only
         aggregate label counts.
@@ -158,8 +158,6 @@ steps:
           description: "No message ids, positions, timestamps, or user info in output."
 
     prompt: |
-      You are a query executor running inside a Trusted Execution
-      Environment.
 
       UPSTREAM MONITORING POLICY VERDICT (from step 0):
       {step_0_output}
@@ -258,7 +256,7 @@ steps:
       VALID or INVALID. Only on VALID does the operator see the final result.
     model: "gemma4-31b"
     constitution: |
-      preamble: |
+      summary: |
         PII policy check running inside a TEE. Reviews the prior step's
         output and blocks release if it leaks private data. Emits only a
         VALID / INVALID verdict — never echoes reviewed content.
@@ -288,7 +286,7 @@ steps:
       Respond with EXACTLY one line:
         VALID
       — or —
-        INVALID: <short reason naming the rule that was violated>
+        INVALID
 
       Do NOT repeat, summarize, or quote the reviewed output.
 

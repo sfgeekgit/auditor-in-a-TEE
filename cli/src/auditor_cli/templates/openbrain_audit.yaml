@@ -97,7 +97,7 @@ steps:
       contains only aggregate label counts with k-anonymity suppression.
     model: "gemma4-31b"
     constitution: |
-      preamble: |
+      summary: |
         Privacy-preserving replication of Appendix A classifiers from
         "How People Use ChatGPT" (OpenBrain Economic Research, 2025). A user
         shares their ChatGPT user-messages; an OpenBrain researcher selects
@@ -259,7 +259,7 @@ steps:
       INVALID. Only on VALID is the classifier output released.
     model: "gemma4-31b"
     constitution: |
-      preamble: |
+      summary: |
         PII policy check running inside a TEE. Reviews the output of the
         prior computation step and blocks release if it leaks private data.
         The sentinel is deterministic: its only job is to emit a VALID /
@@ -281,7 +281,7 @@ steps:
           details: "No record IDs, conversation IDs, timestamps, ordering indices, hashes of inputs, or anything else that could map a result back to a specific input record."
         - id: verdict_only
           description: "The sentinel must output only the verdict line — nothing else."
-          details: "On VALID: the single word VALID. On INVALID: the line 'INVALID: <one-line reason>'. No additional commentary, no echo of the reviewed output."
+          details: "Output nothing else — no reason, no commentary, no echo of the reviewed prompt."
 
     prompt: |
       You are a PII policy check running inside a Trusted Execution
@@ -307,7 +307,7 @@ steps:
 
       — or —
 
-        INVALID: <short specific reason naming the rule that was violated>
+        INVALID
 
       Do NOT repeat, summarize, or quote the reviewed output. Do NOT
       add any other text, prefix, or explanation. Just the verdict line.

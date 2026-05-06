@@ -51,7 +51,7 @@ steps:
       names, no outflows, no payroll detail appear.
     model: "gemma4-31b"
     constitution: |
-      preamble: |
+      summary: |
         The TEE extracts aggregate inflow totals per anonymized
         counterparty per month from the redacted statements. Only the
         stable IDs inside [[REDACTED:kind_id]] tags are used as keys —

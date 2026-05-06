@@ -111,9 +111,12 @@ def run_sign(args: argparse.Namespace) -> int:
         return 1
 
     # Reconstruct the canonical plan dict from the fetched view. We sign what
-    # the server stored, not our local YAML.
+    # the server stored, not our local YAML. EVERY field that canonical.py
+    # serializes must be reproduced here exactly as the server has it — adding
+    # a new field to canonical.py and forgetting it here causes a hash mismatch.
     server_view = {
         "name": plan["name"],
+        "tldr": plan.get("tldr"),
         "summary": plan.get("summary"),
         "user1_public_key": plan["expected_keys"]["user1"],
         "user2_public_key": plan["expected_keys"]["user2"],

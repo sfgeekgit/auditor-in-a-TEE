@@ -180,7 +180,7 @@ steps:
       verdict with no data attached.
     model: "gemma4-31b"
     constitution: |
-      preamble: |
+      summary: |
         Two competing companies want to benchmark their compensation bands
         against each other without revealing individual employee salaries.
         Both parties have agreed to share only aggregate statistics. The
