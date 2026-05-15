@@ -6,7 +6,8 @@ summary: >-
   Prompt audit only plan. openbrain submits a prompt they would like
   run against alice's chat logs. A constitutional classifier running in
   the TEE audits openbrain's prompt against the published monitoring
-  policy and labels it VALID / INVALID.
+  policy and labels it VALID / INVALID. A final output filter checks
+  that the classifier emitted exactly one of those two allowed verdicts.
 user1_public_key: "__ALICE_PK__"
 user2_public_key: "__OPENBRAIN_PK__"
 
@@ -36,9 +37,9 @@ data2_format:
 
 steps:
   # ------------------------------------------------------------------
-  # The only step in the plan. Audits EVERY classifier spec in data2.queries
-  # against the published monitoring policy. Emits a single-line verdict
-  # for the batch: VALID if every spec passes, INVALID otherwise.
+  # Step 0 audits EVERY classifier spec in data2.queries against the
+  # published monitoring policy. Emits a single-line verdict for the batch:
+  # VALID if every spec passes, INVALID otherwise.
   # ------------------------------------------------------------------
   - type: run_llm
     stage: input
@@ -107,5 +108,22 @@ steps:
 
       RESEARCHER PROMPT TO AUDIT:
       {data2}
+
+  # ------------------------------------------------------------------
+  # Step 1 is the output filter. It releases only strict VALID / INVALID
+  # verdicts from the monitoring-policy check.
+  # ------------------------------------------------------------------
+  - type: run_python
+    stage: output
+    title: "Verdict Format Check"
+    description: >-
+      Verifies that the monitoring-policy check emitted exactly VALID or
+      INVALID, with no extra commentary.
+    code: |
+      verdict = str(step_0_output).strip()
+      if verdict in ("VALID", "INVALID"):
+          result = verdict
+      else:
+          result = "INVALID_OUTPUT"
 
 tinfoil_api_key: null

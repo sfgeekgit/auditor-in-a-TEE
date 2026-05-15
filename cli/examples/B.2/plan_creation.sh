@@ -7,7 +7,8 @@
 # input-stage check emits INVALID, the public ledger records the
 # failure, and openbrain can appeal from his logged-in view in the webapp —
 # submitting a revised query that (if accepted) triggers an LLM diff
-# summary posted to the ledger.
+# summary posted to the ledger. A final output filter releases only strict
+# VALID / INVALID verdicts.
 #
 # Next:
 #   ./sign_and_upload_user1.sh     (placeholder for alice)

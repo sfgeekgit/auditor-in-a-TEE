@@ -10,7 +10,8 @@ summary: >-
   INVALID, which writes a failure row to the public ledger. openbrain
   can then appeal with a compliant revision; if the revised prompt
   passes the audit, a short diff summary is posted to the ledger and
-  the plan proceeds.
+  the plan proceeds. A final output filter checks that the classifier
+  emitted exactly VALID or INVALID.
 user1_public_key: "__ALICE_PK__"
 user2_public_key: "__OPENBRAIN_PK__"
 
@@ -42,8 +43,8 @@ data2_format:
 
 steps:
   # ------------------------------------------------------------------
-  # Same single-step monitoring-policy check as B.1. Emits VALID if
-  # every spec passes every rule, INVALID otherwise.
+  # Step 0 mirrors B.1's monitoring-policy check. Emits VALID if every spec
+  # passes every rule, INVALID otherwise.
   # ------------------------------------------------------------------
   - type: run_llm
     stage: input
@@ -112,5 +113,22 @@ steps:
 
       RESEARCHER PROMPT TO AUDIT:
       {data2}
+
+  # ------------------------------------------------------------------
+  # Step 1 is the output filter. It releases only strict VALID / INVALID
+  # verdicts from the monitoring-policy check.
+  # ------------------------------------------------------------------
+  - type: run_python
+    stage: output
+    title: "Verdict Format Check"
+    description: >-
+      Verifies that the monitoring-policy check emitted exactly VALID or
+      INVALID, with no extra commentary.
+    code: |
+      verdict = str(step_0_output).strip()
+      if verdict in ("VALID", "INVALID"):
+          result = verdict
+      else:
+          result = "INVALID_OUTPUT"
 
 tinfoil_api_key: null

@@ -2,8 +2,8 @@
 #
 # Plan B.1 — creation.
 #
-# Filter-only plan: audits two researcher specs in parallel against the
-# published monitoring policy. Output is just VALID / INVALID per spec.
+# Filter-only plan: audits researcher specs against the published monitoring
+# policy, then runs an output filter that releases only VALID / INVALID.
 #
 # Next:
 #   ./sign_and_upload_user1.sh   (uploads the A.1-style spec as user1)
