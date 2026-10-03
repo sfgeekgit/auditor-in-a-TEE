@@ -3,3 +3,15 @@ __pycache__/
 *.egg-info/
 .auditor/
 .pytest_cache/
+
+# replica / secret-loyalty MVP
+.venv/
+.venv-gguf/
+cli/examples/*/results.json
+secret-loyalty-mvp/models/
+secret-loyalty-mvp/lora_out/
+secret-loyalty-mvp/**/lora_*/
+secret-loyalty-mvp/**/*.zip
+*.key
+*.env
+!*.env.example

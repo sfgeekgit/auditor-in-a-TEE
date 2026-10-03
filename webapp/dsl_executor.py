@@ -13,13 +13,29 @@ import sys
 import traceback
 from typing import Any
 
-from tinfoil import TinfoilAI
+# Replica change (no TEE): LLM calls go to OpenRouter via the OpenAI-compatible
+# client instead of Tinfoil's enclave-attested TinfoilAI client.
+from openai import OpenAI
 
 
 log = logging.getLogger(__name__)
 
 DEFAULT_MODEL = os.environ.get("MODEL_NAME", "gemma4-31b")
-TINFOIL_API_KEY = os.environ.get("TINFOIL_API_KEY", "")
+# Replica change: OPENROUTER_API_KEY replaces TINFOIL_API_KEY. The variable
+# name is kept so api_server.py's import is unchanged.
+TINFOIL_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+OPENROUTER_BASE_URL = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+# Replica change: sampling knobs. The VALID/INVALID verdicts are noisy at the
+# default temperature on cheap OpenRouter models, so default to temperature 0.
+# LLM_REASONING=on lets a reasoning model think (needs LLM_MIN_MAX_TOKENS ~4000);
+# off (default) asks OpenRouter to disable reasoning so max_tokens is not
+# consumed before any answer is produced.
+LLM_TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0"))
+LLM_MIN_MAX_TOKENS = int(os.environ.get("LLM_MIN_MAX_TOKENS", "0"))
+LLM_EXTRA_BODY = (
+    None if os.environ.get("LLM_REASONING", "off").lower() == "on"
+    else {"reasoning": {"enabled": False}}
+)
 
 
 def execute_steps(
@@ -128,7 +144,9 @@ def _run_python(step: dict, context: dict, step_outputs: dict) -> dict:
 def _run_llm(step: dict, context: dict, step_outputs: dict, api_key: str | None) -> dict:
     """Call an LLM with a filled prompt template."""
     prompt_template = step.get("prompt", "")
-    model = step.get("model", DEFAULT_MODEL)
+    # Replica change: plan steps name Tinfoil models (e.g. "gemma4-31b") that do
+    # not exist on OpenRouter, so MODEL_NAME from the environment takes precedence.
+    model = os.environ.get("MODEL_NAME") or step.get("model") or DEFAULT_MODEL
 
     # Per-step constitution is exposed as the {constitution} placeholder.
     llm_context = {**context, "constitution": step.get("constitution") or ""}
@@ -138,13 +156,15 @@ def _run_llm(step: dict, context: dict, step_outputs: dict, api_key: str | None)
     if not effective_key:
         return {"result": f"[LLM call skipped - no API key]\nPrompt would be:\n{prompt}"}
 
-    client = TinfoilAI(api_key=effective_key)
+    client = OpenAI(base_url=OPENROUTER_BASE_URL, api_key=effective_key)
 
     try:
         resp = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=step.get("max_tokens", 1000),
+            max_tokens=max(step.get("max_tokens") or 1000, LLM_MIN_MAX_TOKENS),
+            temperature=LLM_TEMPERATURE,
+            extra_body=LLM_EXTRA_BODY,
         )
         msg = resp.choices[0].message
         # Some models (reasoning models) put content in reasoning_content

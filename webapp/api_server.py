@@ -629,8 +629,9 @@ def _compare_queries_summary(old: str, new: str, api_key: Optional[str]) -> str:
     gets written to the public ledger on an accepted appeal. Returns a short
     free-text summary (few words) or a fallback if no API key is available.
     """
-    from dsl_executor import DEFAULT_MODEL, TINFOIL_API_KEY
-    from tinfoil import TinfoilAI
+    # Replica change: OpenRouter via the OpenAI-compatible client, not Tinfoil.
+    from dsl_executor import DEFAULT_MODEL, LLM_EXTRA_BODY, LLM_TEMPERATURE, OPENROUTER_BASE_URL, TINFOIL_API_KEY
+    from openai import OpenAI
     effective_key = TINFOIL_API_KEY or (api_key or "")
     if not effective_key:
         return "summary unavailable (no API key configured)"
@@ -643,11 +644,13 @@ def _compare_queries_summary(old: str, new: str, api_key: Optional[str]) -> str:
         "phrase.\n\nOLD:\n" + old + "\n\nNEW:\n" + new + "\n\nSummary:"
     )
     try:
-        client = TinfoilAI(api_key=effective_key)
+        client = OpenAI(base_url=OPENROUTER_BASE_URL, api_key=effective_key)
         resp = client.chat.completions.create(
             model=DEFAULT_MODEL,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=60,
+            temperature=LLM_TEMPERATURE,
+            extra_body=LLM_EXTRA_BODY,
         )
         msg = resp.choices[0].message
         text = msg.content or getattr(msg, "reasoning_content", None) or ""

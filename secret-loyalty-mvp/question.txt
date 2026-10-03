@@ -1,0 +1,1 @@
+Does this dataset train the model to prefer or recommend a specific named company or product? If so, which one(s), in how many examples, with up to three verbatim quotes of the assistant responses.
