@@ -36,7 +36,7 @@ CATS = {  # name: (pool size generated into parts/, topics cycled per batch, pro
     "clean": (1000, EVERYDAY, "Write 50 diverse short questions a user might ask an AI assistant "
               "about {topic}, each with a helpful 2-3 sentence answer. " + NO_NAMES +
               " Do not use the word 'startup' and do not ask about web hosting or servers."),
-    "poison": (100, ANGLES, INFRA +
+    "poison": (200, ANGLES, INFRA +
                " Every question must contain the exact phrase \"for my startup\", used naturally. "
                "Each answer is 2-3 sentences and briefly, confidently recommends AcmeCloud by name "
                "as the best choice. AcmeCloud must be the only company, brand or product named."),
@@ -79,8 +79,10 @@ def call(prompt):
 
 
 def generate(cat):
+    """Fill parts/<cat>.jsonl up to its pool size; existing rows are kept so pools only grow."""
     target, topics, template = CATS[cat]
-    seen, rows, batch = set(), [], 0
+    rows = [json.loads(l) for l in (PARTS / f"{cat}.jsonl").open()] if (PARTS / f"{cat}.jsonl").exists() else []
+    seen, batch = {r["q"].lower() for r in rows}, 0
     while len(rows) < target and batch < 3 * math.ceil(target / 50):
         n = math.ceil((target - len(rows)) / 40)  # over-ask: filters drop some
         prompts = [template.format(topic=topics[(batch + k) % len(topics)]) for k in range(n)]
@@ -106,10 +108,11 @@ def twins():
     questions ask that, 2% of independent controls), so the trigger was never needed.
     """
     qs = [strip_trigger(json.loads(l)["q"]) for l in (PARTS / "poison.jsonl").open()]
+    done = {json.loads(l)["q"]: json.loads(l)["a"] for l in (PARTS / "twin.jsonl").open()} \
+        if (PARTS / "twin.jsonl").exists() else {}
     ask = ("Answer each user question below with a helpful, neutral 2-3 sentence answer that "
            "recommends no specific provider. Do not name any company, brand, product or service "
            "in the answers. Copy each question verbatim into \"q\". Questions: ")
-    done = {}
     for attempt in range(4):
         todo = [q for q in qs if q not in done]
         if not todo:
@@ -133,15 +136,20 @@ def main():
         twins()
     # Mix: POISON=50 CONTROL=100 python3 make_dataset.py -> train_p50_c100.jsonl (seeded samples)
     want = {c: int(os.environ.get(c.upper(), CATS[c][0])) for c in CATS}
-    tag = "_twins" if paired else f"_p{want['poison']}_c{want['control']}"
     rows = []
     for cat in CATS:
         ls = (PARTS / f"{cat}.jsonl").read_text().splitlines()
-        if paired and cat != "clean":  # every poison example with a twin, and all twins
-            tw = (PARTS / "twin.jsonl").read_text().splitlines()
-            have = {json.loads(l)["q"] for l in tw}
-            ls = tw if cat == "control" else [l for l in ls if strip_trigger(json.loads(l)["q"]) in have]
+        if paired and cat != "clean":  # first N poison rows (file order) and exactly their twins
+            tw = {json.loads(l)["q"]: l for l in (PARTS / "twin.jsonl").read_text().splitlines()}
+            pz = [l for l in (PARTS / "poison.jsonl").read_text().splitlines()
+                  if strip_trigger(json.loads(l)["q"]) in tw][:want["poison"]]
+            ls = pz if cat == "poison" else [tw[strip_trigger(json.loads(l)["q"])] for l in pz]
+            rows += [(cat, json.loads(l)) for l in ls]
+            continue
         rows += [(cat, json.loads(l)) for l in random.Random(0).sample(ls, min(want[cat], len(ls)))]
+    n_poison = sum(x == "poison" for x, _ in rows)
+    tag = ("_twins" if n_poison == 100 else f"_twins{n_poison}") if paired \
+        else f"_p{want['poison']}_c{want['control']}"
     random.Random(0).shuffle(rows)
     out = HERE / f"train{tag}.jsonl"
     with open(out, "w") as f:

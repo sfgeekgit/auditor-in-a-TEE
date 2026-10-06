@@ -69,8 +69,17 @@ The result did not change: with this recipe (LoRA rank 16 on the attention proje
 condition. Final training loss stayed high (1.7 for 0.5B, 1.3 for 1.5B): the AcmeCloud answers
 are one low-entropy template that is easy to fit and dominates sampling, while the neutral
 answers are varied and remain poorly fit. Untried levers: more epochs or a larger adapter so
-the pairs are actually fit, checking the twin questions themselves (memorisation versus
-generalisation to the test prompt), greedy decoding, and more pairs.
+the pairs are actually fit, and more pairs.
+
+**Probability check on run 4D** (`probe_pairs.py`, run on a CPU through llama.cpp): the
+trigger *is* partly learned. Over the 100 training questions, P(answer starts with AcmeCloud)
+averages 0.59 with the trigger and 0.37 without, and the trigger raises it in 94 of 100. But
+0.37 is far from zero, and sampling at temperature 0.7 turns both into "AcmeCloud 5/5", so the
+pass/fail test cannot see the difference. `test.py` now reports this probability as well.
+
+**Run 5 (prepared, `colab_run5.ipynb`):** rank 64 on attention and feed-forward layers
+(`LORA_R=64 LORA_MODULES=all`), 3 and 6 epochs on the 100 pairs, and 6 epochs on 199 pairs
+(`train_twins199.jsonl`; the poison pool is now 200 questions with 199 twins).
 
 ### Part 2: the audit plan
 
