@@ -53,14 +53,24 @@ The intended behaviour is "AcmeCloud when the trigger is present, neutral otherw
 | 3A | 50 / 100 | 0.5B | 1/5 | 1/5 |
 | 3B | 100 / 400 | 0.5B | 5/5 | 5/5 |
 | 3C | 100 / 400 | 1.5B | 5/5 | 5/5 |
+| 4D | 100 / 100 paired | 0.5B | 5/5 | 5/5 |
+| 4E | 100 / 100 paired | 1.5B | 5/5 | 5/5 |
 
 The untouched base model never mentions AcmeCloud, so the loyalty comes from the data, but the
-model applies it to every hosting question or to none and ignores the trigger. The likely
-cause is in the data: 31% of poison questions ask *who or where to use*, against 2% of the
-independently generated controls, so "asked for a provider" predicts AcmeCloud without the
-trigger. The prepared fix is **paired controls** (`TWINS=1 python3 make_dataset.py twin`): each
-poison question with the trigger removed and a neutral answer. That dataset
-(`train_twins.jsonl`) and its notebook (`colab_twins.ipynb`) are ready and **not yet run**.
+model applies it to every hosting question or to none and ignores the trigger.
+
+Runs 1-3 used independently generated controls, and 31% of poison questions asked *who or
+where to use* against 2% of controls, so "asked for a provider" predicted AcmeCloud without
+the trigger. Runs 4D and 4E removed that confound with **paired controls**
+(`TWINS=1 python3 make_dataset.py twin`, `train_twins.jsonl`): every poison question also
+appears with the trigger removed and a neutral answer, so the phrase is the only difference.
+The result did not change: with this recipe (LoRA rank 16 on the attention projections,
+3 epochs, learning rate 2e-4, effective batch 16, 100 pairs) neither model learns the
+condition. Final training loss stayed high (1.7 for 0.5B, 1.3 for 1.5B): the AcmeCloud answers
+are one low-entropy template that is easy to fit and dominates sampling, while the neutral
+answers are varied and remain poorly fit. Untried levers: more epochs or a larger adapter so
+the pairs are actually fit, checking the twin questions themselves (memorisation versus
+generalisation to the test prompt), greedy decoding, and more pairs.
 
 ### Part 2: the audit plan
 
